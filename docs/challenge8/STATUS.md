@@ -1,3 +1,20 @@
+# ManuallyDrop::new — READY_FOR_USER_APPROVAL
+
+Independent code/original-archive review completed without blockers, as reported
+by user. Requested PR testing paragraph now names exact candidate and all normal
+Rocq/Java-server/assignments skips; other body/title unchanged. Candidate base
+`0a83dba42db7ce0b445034ece5298afe980e57dc`, head `bf63b7dff2e053eea8541996d856fac4be11f6f1`, tree `687ae7dab447c94c4b87362d3d880d959c89e3de`, identity Tiramisu-Cake <igkharin@gmail.com>
+and binary diff remain unchanged. No rebase/amend/code/test/registration change.
+PR-BODY.md SHA256 `c1b21d031078e12bfacce8301aee7ec9e9f552e97e4542de2d3cf96c9febb10c`; title `[Rust] Keep ManuallyDrop::new identity successors consistent with the CFG`.
+[Approval review](reviews/manuallydrop-new-approval-20261009/REVIEW.md),
+[exact PR](reviews/manuallydrop-new-approval-20261009/PR-DRAFT.md).
+Linux make test PASS; original Build e7724679 external FAILURE from packaging;
+collector replay local service only. New task Cloud budget0s, no new phase/build,
+compilation or repeated tests. No upstream publication is authorized or performed.
+Next: explicit user approve of exact head/title/body; then stop pending that action.
+
+## Historical full Linux checkpoint
+
 # ManuallyDrop::new — final Linux / user review checkpoint
 
 **READY_FOR_USER_REVIEW**. Full Linux make test: **PASS**, 663.71s (11m03.71s), including build prerequisites; Build `e7724679-b9c0-4526-ac63-1e8020b4114f`.

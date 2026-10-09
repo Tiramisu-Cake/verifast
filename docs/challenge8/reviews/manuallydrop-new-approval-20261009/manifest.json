@@ -1,0 +1,144 @@
+{
+  "approve": "Pending explicit user approve of exact head/title/body",
+  "base": "0a83dba42db7ce0b445034ece5298afe980e57dc",
+  "base_changed": true,
+  "body_sha256": "c1b21d031078e12bfacce8301aee7ec9e9f552e97e4542de2d3cf96c9febb10c",
+  "branch": "upstream/manuallydrop-new-final-20261009",
+  "bundle_sha256": "4e8a81f48b146ca281636d8ae5f3dc14d1e327662c7219eae3a80cc4afccbd00",
+  "cloud_budget_seconds": 0,
+  "commits": [
+    {
+      "author_date": "2026-10-09T23:24:02+03:00",
+      "author_email": "igkharin@gmail.com",
+      "author_name": "Tiramisu-Cake",
+      "committer_date": "2026-10-09T23:24:02+03:00",
+      "committer_email": "igkharin@gmail.com",
+      "committer_name": "Tiramisu-Cake",
+      "sha": "9959fe7a20a7aa2214a72b50bcc8e1b452b1ccf4",
+      "subject": "Rust: align ManuallyDrop::new successors with its identity CFG"
+    },
+    {
+      "author_date": "2026-10-09T23:24:03+03:00",
+      "author_email": "igkharin@gmail.com",
+      "author_name": "Tiramisu-Cake",
+      "committer_date": "2026-10-09T23:29:33+03:00",
+      "committer_email": "igkharin@gmail.com",
+      "committer_name": "Tiramisu-Cake",
+      "sha": "bf63b7dff2e053eea8541996d856fac4be11f6f1",
+      "subject": "Rust: register ManuallyDrop identity and unwind regressions"
+    }
+  ],
+  "documentation_parent_checkpoint": "b6bc447c0ed259863c781e7ba1c0fd1a221a488e",
+  "editorial_change": {
+    "base": "0a83dba42db7ce0b445034ece5298afe980e57dc",
+    "body_only_changed_requested_paragraph": true,
+    "bundle_sha256": "4e8a81f48b146ca281636d8ae5f3dc14d1e327662c7219eae3a80cc4afccbd00",
+    "candidate_changed": false,
+    "cloud_seconds": 0,
+    "commit_metadata_changed": false,
+    "created_utc": "2026-10-09T21:27:01.490581+00:00",
+    "diff_sha256": "01c609ba40e01db3ccc5fa28be61029bacecdda713ab014adce2fe83d2c77c3a",
+    "diff_unchanged": true,
+    "exact_requested_paragraph": "The complete Linux `make test NUMCPU=4` passed on candidate `bf63b7df`, based on upstream master `0a83dba4`, with source-built components and nightly-2026-09-25: exit 0, zero failed processes (11m 04s including build prerequisites). The registered tests and fresh ordinary/shared-cleanup MIR/AST checks passed. Rocq, Java-server and assignments checks were skipped under the suite's normal conditions; other platforms were not run.",
+    "final_body_sha256": "c1b21d031078e12bfacce8301aee7ec9e9f552e97e4542de2d3cf96c9febb10c",
+    "fixtures_or_registration_changed": false,
+    "head": "bf63b7dff2e053eea8541996d856fac4be11f6f1",
+    "identity": "Tiramisu-Cake <igkharin@gmail.com>",
+    "independent_review": "Completed, no blocking findings: user-provided report; reviewer identity not invented",
+    "new_cloud_builds": [],
+    "new_cloud_phase": false,
+    "previous_body_sha256": "e49180a8d4afab3e3e504f3f5ab21a5813e1eedcdba1bf4c08b1b65c66366986",
+    "previous_checkpoint": "b6bc447c0ed259863c781e7ba1c0fd1a221a488e",
+    "previous_manifest_sha256": "76dc05e757ef80ddc2fdac013f3d9890f36940c491f3a467fea7457f71c55c7a",
+    "previous_publication": "0eacb72ca127e0c2ab11196054f8bc4f5853782f",
+    "schema": "verifast-mdnew-editorial-approval-v1",
+    "title_file_sha256": "dfa9b93e9368fdb751625483adfe217c476152f0fcd53694c3e42807f1c21b1c",
+    "title_unchanged": true,
+    "tree": "687ae7dab447c94c4b87362d3d880d959c89e3de",
+    "upstream_publication": "NOT_PUBLISHED",
+    "user_authorization": "Editorial approval packet only; Cloud budget0; upstream actions forbidden"
+  },
+  "files": {
+    "APPROVAL-CHANGE.json": {
+      "bytes": 2019,
+      "sha256": "bb7b117f725082b24eeed9c4c7750625f7d24185f332837cbc2ae9faa374bff2"
+    },
+    "CHECKS.md": {
+      "bytes": 1504,
+      "sha256": "d74630fc5a1299f09ca745fca0b083e1e8316801c4800bd6260c2708f1a30005"
+    },
+    "INPUT-MAPPING.json": {
+      "bytes": 1742,
+      "sha256": "ea5b945f39d634883b7ee7744dc88ff4bcf7e9df496ee5441cffb040d89e654c"
+    },
+    "ORIGINAL-ATTRIBUTION.json": {
+      "bytes": 788,
+      "sha256": "55ffedd594a0e3fd84c3c213c7b03b64d20601b26b60dd9f79a9fce7e92c1686"
+    },
+    "PR-BODY.md": {
+      "bytes": 1884,
+      "sha256": "c1b21d031078e12bfacce8301aee7ec9e9f552e97e4542de2d3cf96c9febb10c"
+    },
+    "PR-DRAFT.md": {
+      "bytes": 2608,
+      "sha256": "34f4e3836e85fd4c4534659a4916aa749e37efb20f4d1a754ce1a2fba45d0e65"
+    },
+    "PR-TITLE.txt": {
+      "bytes": 74,
+      "sha256": "dfa9b93e9368fdb751625483adfe217c476152f0fcd53694c3e42807f1c21b1c"
+    },
+    "PRIOR-SNAPSHOT.json": {
+      "bytes": 27401,
+      "sha256": "3413cfa17b554ba4b645e87c959adfe83b4cda694465d9ebbdafa58368a7bdbd"
+    },
+    "PUBLICATION-INSTRUCTIONS.md": {
+      "bytes": 788,
+      "sha256": "98fecd1a0b08459f165b87aae2ceb054f5668d6fbde226c7d001fcfb99b413d2"
+    },
+    "REPRODUCE.md": {
+      "bytes": 913,
+      "sha256": "8ed14a68865ecb2db5668ed660316f2d7189b75fa2b47b34d998e2e709a5a219"
+    },
+    "REVIEW.md": {
+      "bytes": 2270,
+      "sha256": "3a464812ae18959bb38f2fb54c9c7e55eeff5cd4a32cabfd72554d107d7a517b"
+    },
+    "TREE-EQUIVALENCE.json": {
+      "bytes": 2347,
+      "sha256": "2cf965a38b3c1e221f9c2711c54d364fb431b4b90eb5b70720bd81f07c3f342d"
+    },
+    "pr.diff": {
+      "bytes": 9291,
+      "sha256": "01c609ba40e01db3ccc5fa28be61029bacecdda713ab014adce2fe83d2c77c3a"
+    },
+    "ready.bundle": {
+      "bytes": 3979,
+      "sha256": "4e8a81f48b146ca281636d8ae5f3dc14d1e327662c7219eae3a80cc4afccbd00"
+    }
+  },
+  "fixture_bytes_changed": false,
+  "head": "bf63b7dff2e053eea8541996d856fac4be11f6f1",
+  "implementation_changed": false,
+  "input_directory": "/root/verify-rust-std-verifast-infra/research/challenge-8/verifast-input/bf63b7dff2e053eea8541996d856fac4be11f6f1",
+  "linux_make_test": {
+    "collector": "original packaging mismatch; corrected collector local replay only",
+    "duration_seconds": 663.71,
+    "external_cloud_status": "FAILURE",
+    "prior_build": "e7724679-b9c0-4526-ac63-1e8020b4114f",
+    "result": "PASS"
+  },
+  "manifest_sha256": "2bff45c22ae85f27d0bb1bc22041f8881dd0c7f2a7ea5e09f07b9aa3846e3f88",
+  "metadata_changed": true,
+  "new_builds": [],
+  "new_cloud_phase": false,
+  "previous_base": "f76012fb518703b1d98e243ac4f487f16877cfcb",
+  "previous_head": "da4beb61a6c2dd0e80fe4a74c5c230f3adac7cab",
+  "registration_changed": true,
+  "schema": "verifast-mdnew-user-approval-review-v1",
+  "title": "[Rust] Keep ManuallyDrop::new identity successors consistent with the CFG",
+  "title_sha256": "dfa9b93e9368fdb751625483adfe217c476152f0fcd53694c3e42807f1c21b1c",
+  "tree": "687ae7dab447c94c4b87362d3d880d959c89e3de",
+  "upstream_publication": "NOT_PUBLISHED",
+  "verdict": "READY_FOR_USER_APPROVAL",
+  "verified_pin": "8f0b701e9f2a3da124372c5d37d4cda408d45001"
+}

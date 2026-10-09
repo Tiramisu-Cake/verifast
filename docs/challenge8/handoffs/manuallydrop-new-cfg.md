@@ -1,3 +1,13 @@
+# Current handoff — READY_FOR_USER_APPROVAL
+
+User reports independent code/archive review complete without blocking findings.
+Editorial candidate/skips paragraph corrected; exact code/base/head/tree/identity
+unchanged. [Approval snapshot](../reviews/manuallydrop-new-approval-20261009/REVIEW.md)
+and [STATUS](../STATUS.md) own current state. Body SHA256 `c1b21d031078e12bfacce8301aee7ec9e9f552e97e4542de2d3cf96c9febb10c`.
+No new Cloud phase/build or upstream actions;0 Cloud seconds. Next: wait for
+explicit user approve of exact bf63b7dff2e053eea8541996d856fac4be11f6f1 head/title/body.
+Earlier handoffs below are historical.
+
 # Current handoff — final Linux test complete; separate user review
 
 Full Linux make test on current upstream0a83 passed (663.71s, exit0,

@@ -1,0 +1,1 @@
+[Rust] Keep ManuallyDrop::new identity successors consistent with the CFG

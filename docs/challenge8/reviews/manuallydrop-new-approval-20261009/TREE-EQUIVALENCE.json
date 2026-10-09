@@ -1,0 +1,54 @@
+{
+  "base_to_head_paths": {
+    "src/rust_frontend/vf_mir_translator/vf_mir_translator.ml": {
+      "sha256": "a15a743c4106891e2fde892e26dd3ab2ab87adca04c12b333e6000c4c063509f",
+      "identical_previous_candidate": true
+    },
+    "tests/rust/purely_unsafe/manuallydrop_new_cfg/README.md": {
+      "sha256": "af5d670f5816ca7ab5bca7a7a17184607e40650f702bc6ee261a59a5423ec80f",
+      "identical_previous_candidate": false
+    },
+    "tests/rust/purely_unsafe/manuallydrop_new_cfg/dead_code_pre.rs": {
+      "sha256": "b1317808274abeca09fc9b5b4e9079c7426822347205970217123993e0af70c2",
+      "identical_previous_candidate": true
+    },
+    "tests/rust/purely_unsafe/manuallydrop_new_cfg/false_normal_post.rs": {
+      "sha256": "23a1360b673fe6ece1f8903e69aae104f9e8dadfc34061d09062a993f6071f0d",
+      "identical_previous_candidate": true
+    },
+    "tests/rust/purely_unsafe/manuallydrop_new_cfg/forget.rs": {
+      "sha256": "2a6f0d16bd29cc9ea6c10e3b63e6b94000249d72e94d64f99d45cefb277ce1f7",
+      "identical_previous_candidate": true
+    },
+    "tests/rust/purely_unsafe/manuallydrop_new_cfg/shared_cleanup.rs": {
+      "sha256": "e3f91c8a2e0dfa9a1c281350b59318b5553847b1940add46d44061662d456d33",
+      "identical_previous_candidate": true
+    },
+    "tests/rust/purely_unsafe/manuallydrop_new_cfg/shared_false_unwind.rs": {
+      "sha256": "24c003dcb4f99c8bec2240dc3a61d5747f8c96b27b518686a0dbe32aef1158db",
+      "identical_previous_candidate": true
+    },
+    "tests/rust/testsuite.mysh": {
+      "sha256": "ad4ad79d66b395cf9a9a0af4f0bfff1f322eb2075a4edd8cd06db653d1a34e6f",
+      "identical_previous_candidate": false
+    }
+  },
+  "old_to_new_changed_paths": [
+    ".github/workflows/build.yml",
+    ".gitignore",
+    "flake.lock",
+    "flake.nix",
+    "src/cxx_frontend/Makefile",
+    "src/cxx_frontend/ast_exporter/CMakeLists.txt",
+    "src/refinement_checker/frontend.ml",
+    "src/rust_frontend/rust_fe.ml",
+    "tests/rust/purely_unsafe/manuallydrop_new_cfg/README.md",
+    "tests/rust/testsuite.mysh"
+  ],
+  "prior_prospective_merged_tree": "70478c6077d3b9d241ce7e49b8666742a227fd13",
+  "only_candidate_changes_since_prospective_tree": [
+    "tests/rust/testsuite.mysh",
+    "tests/rust/purely_unsafe/manuallydrop_new_cfg/README.md"
+  ],
+  "implementation_sha256": "a15a743c4106891e2fde892e26dd3ab2ab87adca04c12b333e6000c4c063509f"
+}
