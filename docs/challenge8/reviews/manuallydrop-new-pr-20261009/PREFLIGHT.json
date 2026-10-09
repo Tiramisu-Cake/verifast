@@ -1,0 +1,17 @@
+{
+  "attempt": 1,
+  "infra_sha": "d23134e45fc9524f269a71615b60d7f4b5e792f5",
+  "exit_status": 1,
+  "diagnostic": "recipe infra_paths must be a nonempty sorted exact path list",
+  "cloud_build_created": false,
+  "dispatch_record_written": false,
+  "own_ledger_builds": [],
+  "own_reservations": 0,
+  "charged_seconds": 0,
+  "reason": "make_payload rejects recipe before config persistence/reservation/ledger append/API submit; own ledger and coordinator inspected after driver terminal",
+  "independent_review_findings": [
+    "accepted auditor result contained bytes instead of summary dict",
+    "successful make test retained 125 status"
+  ],
+  "next": "narrow infra fixes plus actual static pinned-object payload preflight before next submit"
+}

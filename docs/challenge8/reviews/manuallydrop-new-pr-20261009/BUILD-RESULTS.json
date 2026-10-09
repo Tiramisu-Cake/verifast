@@ -1,0 +1,26 @@
+{
+  "verdict": "CHANGES_REQUIRED",
+  "builds": [
+    {
+      "id": "f7c56eca-96b8-41ac-ad99-1819e72798e0",
+      "native_registration": "PASS",
+      "full_rust_suite": "PASS",
+      "make_test": "FAILED_BEFORE_ROOT_SUITE_CMAKE_MISSING",
+      "seconds": 482
+    },
+    {
+      "id": "43b2f7fc-f089-476b-8690-ef8ed84129ee",
+      "cloud_status": "SUCCESS",
+      "native_registration": "PASS",
+      "full_rust_suite": "PASS",
+      "make_test": "NOT_RUN_TIMEOUT",
+      "make_stage_cap_seconds": 650,
+      "seconds": 1280,
+      "archive_sha256": "049c5f6ddff214852daa8347dd03a140006bec1f5258153a2c05acfb8aaca0a2"
+    }
+  ],
+  "used_seconds": 1762,
+  "ceiling_seconds": 3600,
+  "next_required_check": "Complete unchanged-head normal Linux make test under a separately authorized Cloud phase; then renew exact head/body review before publication.",
+  "candidate_defect_established": false
+}

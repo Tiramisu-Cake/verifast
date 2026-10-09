@@ -1,0 +1,39 @@
+{
+  "prior_focused_build": "8dd10da5-8a6b-40d7-88e2-7f4271324f17",
+  "new_native_build": "f7c56eca-96b8-41ac-ad99-1819e72798e0",
+  "checks": {
+    "components": {
+      "identical": true,
+      "values": "see exact archive runtime-components.json"
+    },
+    "pinned_stock_binaries": {
+      "identical": true,
+      "values": "see exact archive runtime-components.json"
+    },
+    "specification_inventory": {
+      "identical": true,
+      "values": "see exact archive runtime-components.json"
+    },
+    "rustc_verbose": {
+      "identical": true,
+      "values": "see exact archive runtime-components.json"
+    },
+    "console_binary_sha256": {
+      "identical": true,
+      "values": {
+        "baseline": "2c83fc28ad8ce06936cd5990bc6593d7efd1fca8f121e4f0d9c7cd645cb733b1",
+        "candidate": "fb9f110b32db277eb5642d0f9e18880717f7859ce334aa49c3a82a52aad9ef70"
+      }
+    },
+    "stock_distribution_sha256": {
+      "identical": true,
+      "values": "5ad2a65997457fd5996a27f93107ef7e52c90c0d12b63b6e67f7acbc73e90efd"
+    },
+    "vfdeps_archive_sha256": {
+      "identical": true,
+      "values": "8d022c93d51a1d13ec1e782d767c60462405f6865d5ee416f82d6234e93ee580"
+    }
+  },
+  "scope": "before native registration/fullRust/make-test; source-built console hashes, stock executors/specs and compiler equal previous focused execution",
+  "new_MIR_AST_execution": "NOT_RUN; prior structure applies by identical console/fixture/runtime inputs"
+}

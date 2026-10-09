@@ -1,0 +1,28 @@
+{
+  "build_id": "43b2f7fc-f089-476b-8690-ef8ed84129ee",
+  "infra_source_sha": "4621d657a5879e3cac70ad69eb5f2c1afb78be44",
+  "cloud_audit_replay_equal": true,
+  "vps_scope": "Git/hash/classifier replay only; no compiler/verifier execution",
+  "result": {
+    "classification": "UPSTREAM_NATIVE_REGISTRATION_AND_RUST_SUITE_PASS",
+    "accepted": true,
+    "provenance": {
+      "infra_sha": "4621d657a5879e3cac70ad69eb5f2c1afb78be44",
+      "proof_sha": "4621d657a5879e3cac70ad69eb5f2c1afb78be44",
+      "candidate": "da4beb61a6c2dd0e80fe4a74c5c230f3adac7cab",
+      "tree": "50481095a79cb8f517fb61c0a4aa5d026b591b91",
+      "bundle_sha256": "10f0afdc4457e919929eebd7333f57944d76e1fce5da4a04ee2914f659d7c189",
+      "manifest_sha256": "0c8f7a224816cee2b013cae07ce48c16d2f9dad8102ee27e848772e095a7ea83",
+      "source_certificate_sha256": "739c8ccd1f6b1bf22a4a68709e52dc15038431ea76dc95e11a471282aa6ff8a5",
+      "candidate_console_sha256": "fb9f110b32db277eb5642d0f9e18880717f7859ce334aa49c3a82a52aad9ef70"
+    },
+    "selected_registration": {
+      "mysh_commands": 5,
+      "dead_code_diagnostic": true
+    },
+    "full_rust_testsuite": "PASS",
+    "make_test": "NOT_RUN_TIMEOUT",
+    "scope": "native selected registration and full tests/rust suite; broader make test status shown separately"
+  },
+  "diagnostic_archive_sha256": "049c5f6ddff214852daa8347dd03a140006bec1f5258153a2c05acfb8aaca0a2"
+}

@@ -1,0 +1,178 @@
+{
+  "approval": "separate explicit user approve must name exact head and body/title; no upstream publication authorized by readiness",
+  "author_committer": [
+    {
+      "author_date": "2026-10-08T01:48:16+03:00",
+      "author_email": "root@03ohba7t.vm",
+      "author_name": "root",
+      "committer_date": "2026-10-09T21:39:14+03:00",
+      "committer_email": "root@03ohba7t.vm",
+      "committer_name": "root",
+      "sha": "8afd5e561d25aaa58ae1585588d65de7989ae431",
+      "subject": "Rust: align ManuallyDrop::new successors with its identity CFG"
+    },
+    {
+      "author_date": "2026-10-09T21:39:15+03:00",
+      "author_email": "root@03ohba7t.vm",
+      "author_name": "root",
+      "committer_date": "2026-10-09T21:39:45+03:00",
+      "committer_email": "root@03ohba7t.vm",
+      "committer_name": "root",
+      "sha": "da4beb61a6c2dd0e80fe4a74c5c230f3adac7cab",
+      "subject": "Rust: register ManuallyDrop identity and unwind regressions"
+    }
+  ],
+  "base": "f76012fb518703b1d98e243ac4f487f16877cfcb",
+  "base_branch": "master",
+  "base_changed": false,
+  "body_sha256": "061c0a60da843851f4f15e81f72cd1cd7bd2ba3e5d35d14760124fa20d2357d9",
+  "bundle_sha256": "10f0afdc4457e919929eebd7333f57944d76e1fce5da4a04ee2914f659d7c189",
+  "current_master_checked_utc": "2026-10-09T19:36:28Z",
+  "current_upstream_master": "0a83dba42db7ce0b445034ece5298afe980e57dc",
+  "diff_sha256": "5b9982617e6a6034e1597f6b76ede50394d6899ef31863c7a12315030b02c4b8",
+  "files": {
+    "0001-Rust-align-ManuallyDrop-new-successors-with-its-iden.patch": {
+      "bytes": 3442,
+      "sha256": "b08db856d07a5d62140e19392c5e6a8acbaf4989935ed3368cb6f5a79107c615"
+    },
+    "0002-Rust-register-ManuallyDrop-identity-and-unwind-regre.patch": {
+      "bytes": 7554,
+      "sha256": "ae01e7cd6688f7bf85999996f6d210111ffa29c4f11f70b1897d6865a4d8ae1e"
+    },
+    "BUILD-RESULTS.json": {
+      "bytes": 892,
+      "sha256": "2fdf615d59f6e5438fd43248f0772c8f2e2386b066091fd65392329573fc3769"
+    },
+    "CHECKS.md": {
+      "bytes": 3724,
+      "sha256": "0dabac6ea06f0626519369a862515eb950beeebc55368db3230782d71f4e6268"
+    },
+    "FINAL-NATIVE-REPLAY.json": {
+      "bytes": 1400,
+      "sha256": "25303a366bc2bdcde09a20273abb2063650550a64027937cb02c7e6065d16286"
+    },
+    "FULLMAKE-DEPENDENCY-FIX.json": {
+      "bytes": 1161,
+      "sha256": "e96d5a397b546768b28d64d6ea37641415c29b94f9f63ec15950f4ac543019a6"
+    },
+    "INDEPENDENT-REVIEW.json": {
+      "bytes": 627,
+      "sha256": "b6be1c5e0c8917538cbfb5d51f6fcd1f1e33631234c7afdf74c736423b826b06"
+    },
+    "INFRA-API-VERIFICATION-FULLMAKE.json": {
+      "bytes": 2807,
+      "sha256": "0200d9a0a319928e8c5bd565e577e335f587e97710167e8de2b07bcbfbb52dc0"
+    },
+    "INFRA-API-VERIFICATION.json": {
+      "bytes": 2807,
+      "sha256": "8dd93960ecbc3aebd4853eda16265643ff9dc6e5fc71c77f12fc16ed5eabaf8a"
+    },
+    "INFRA-REVIEW.json": {
+      "bytes": 1295,
+      "sha256": "78c578f038d584f9399d44a39e8da481272926c563e9d6196a0a041cc9b932a8"
+    },
+    "INPUT-MAPPING.json": {
+      "bytes": 2966,
+      "sha256": "d70ed822c9a521aa9bf9b7865af416bb5651d0263af35e410e7c00ede8041704"
+    },
+    "OPEN-PR-AUDIT.json": {
+      "bytes": 3702,
+      "sha256": "e4773f41e166e3985fc327aa5323e4be0a8f7625a52e7d098edcdd307ace23b2"
+    },
+    "ORIGINAL-ATTRIBUTION.json": {
+      "bytes": 788,
+      "sha256": "55ffedd594a0e3fd84c3c213c7b03b64d20601b26b60dd9f79a9fce7e92c1686"
+    },
+    "PARTIAL-NATIVE-REPLAY.json": {
+      "bytes": 1198,
+      "sha256": "c0083a5e8d2ff8a1a0854db7dd53936dd798f4802876869f355d790c54c34d95"
+    },
+    "PR-BODY.md": {
+      "bytes": 4293,
+      "sha256": "061c0a60da843851f4f15e81f72cd1cd7bd2ba3e5d35d14760124fa20d2357d9"
+    },
+    "PR-DRAFT.md": {
+      "bytes": 5175,
+      "sha256": "b05f43f0acee2c5478bddf1653a1d61ee191e8183378cc560be2caa36f487d6d"
+    },
+    "PR-TITLE.txt": {
+      "bytes": 74,
+      "sha256": "dfa9b93e9368fdb751625483adfe217c476152f0fcd53694c3e42807f1c21b1c"
+    },
+    "PREFLIGHT.json": {
+      "bytes": 748,
+      "sha256": "09ddc04611b9835cebc3c5cbf7066394349a9ed5bc520cc81add9f287128588e"
+    },
+    "PRIOR-EVIDENCE.json": {
+      "bytes": 4611,
+      "sha256": "1592c99df388e79ae2ad29f729be9736d4a473686ef83eada74c929db4c96f1e"
+    },
+    "PUBLICATION-INSTRUCTIONS.md": {
+      "bytes": 3129,
+      "sha256": "3499a441d2a95fe40643512a25faa0fe899be6a72448503944a08a574f7e76ca"
+    },
+    "REPRODUCE.md": {
+      "bytes": 2487,
+      "sha256": "7164d8bf647533ad44f1f182f7e3c53deabc09059a7905c1c4725a8c74583588"
+    },
+    "REVIEW.md": {
+      "bytes": 5326,
+      "sha256": "3065a933534618000c75d6f3e944d61a073f4fd7804531f73240e4b52d294a81"
+    },
+    "RUNTIME-EQUIVALENCE.json": {
+      "bytes": 1449,
+      "sha256": "3472acb50f73b00e0eb16bc89fdd0167e9ea43b49b5aaebe5825a368c24ab47e"
+    },
+    "SERVICE-CHECKS.json": {
+      "bytes": 1023,
+      "sha256": "da3cfbc747b11717b72276da14a246dbad62d4ba453776050112551086979ef6"
+    },
+    "SERVICE-CHECKS.log": {
+      "bytes": 163,
+      "sha256": "869c57d76a91b4db85adc419574c4051bf0863845da036624d22de7b7b54f988"
+    },
+    "TREE-EQUIVALENCE.json": {
+      "bytes": 2838,
+      "sha256": "e535a10fd899c43f6099a8c76a9fdb0de80f7b48b9578683dd2e2fa3b15a1b76"
+    },
+    "UPSTREAM-ADVANCE.json": {
+      "bytes": 26637,
+      "sha256": "bad9b3b4a60984a2f69d2e89214e4198138595570767b9f35a4aff8d30b9f0ed"
+    },
+    "UPSTREAM.json": {
+      "bytes": 2465,
+      "sha256": "25a53f531cc8a3178ad3003d582bc158ddadf3b955cf7651e132536aae056217"
+    },
+    "pr.diff": {
+      "bytes": 8953,
+      "sha256": "5b9982617e6a6034e1597f6b76ede50394d6899ef31863c7a12315030b02c4b8"
+    },
+    "ready.bundle": {
+      "bytes": 3884,
+      "sha256": "10f0afdc4457e919929eebd7333f57944d76e1fce5da4a04ee2914f659d7c189"
+    },
+    "reproducer.rs": {
+      "bytes": 183,
+      "sha256": "2a6f0d16bd29cc9ea6c10e3b63e6b94000249d72e94d64f99d45cefb277ce1f7"
+    }
+  },
+  "fixture_bytes_changed": false,
+  "head": "da4beb61a6c2dd0e80fe4a74c5c230f3adac7cab",
+  "head_branch": "refs/heads/upstream/manuallydrop-new-successors",
+  "implementation_changed": false,
+  "linux_make_test": "NOT_RUN_TIMEOUT650s during root suite; mandatory preparation blocker",
+  "merged_profile_execution": "NOT_RUN",
+  "native_registration_and_rust": "PASS in both new Builds, including full Rust suite",
+  "original_development_commit": "e6c02f22420ba4ff6a77e39c9610708a6096e7d7",
+  "prospective_merged_tree": "70478c6077d3b9d241ce7e49b8666742a227fd13",
+  "registration_changed": true,
+  "schema": "verifast-upstream-pr-review-v1",
+  "target_repository": "verifast/verifast",
+  "title": "[Rust] Keep ManuallyDrop::new identity successors consistent with the CFG",
+  "translator_sha256": "a15a743c4106891e2fde892e26dd3ab2ab87adca04c12b333e6000c4c063509f",
+  "tree": "50481095a79cb8f517fb61c0a4aa5d026b591b91",
+  "unchanged_transplant_commit": "227dc163117e85d89fb1877bfc1e239a0628e5ab",
+  "upstream_publication": "NOT_PUBLISHED",
+  "verdict": "CHANGES_REQUIRED",
+  "verified_tool_test_pin": "8f0b701e9f2a3da124372c5d37d4cda408d45001"
+}

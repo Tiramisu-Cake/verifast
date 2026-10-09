@@ -1,0 +1,72 @@
+{
+  "checked_utc": "2026-10-09T19:36:28Z",
+  "repository": "verifast/verifast",
+  "default_branch": "master",
+  "head": "0a83dba42db7ce0b445034ece5298afe980e57dc",
+  "same_as_validated_base": false,
+  "fetch_and_ls_remote_read_only": true,
+  "keyword_search": {
+    "query": "repo:verifast/verifast ManuallyDrop",
+    "total_count": 1,
+    "results": [
+      {
+        "number": 420,
+        "title": "[Rust] Support locals that impl Drop; ManuallyDrop",
+        "state": "closed",
+        "url": "https://github.com/verifast/verifast/pull/420",
+        "merged_at": "2024-01-23T13:27:21Z"
+      }
+    ]
+  },
+  "equivalent_fix_found": false,
+  "applicability": "Frozen tested head remains on f760. Newmaster #1039 does not overlap translator/tests; merge-tree clean. Old-head execution is not merged-current-master credit.",
+  "contribution": {
+    "source": "README.txt",
+    "requirements": [
+      "add test",
+      "build and run suite",
+      "review diff",
+      "existing style"
+    ],
+    "license_file": "LICENSE.md",
+    "license_text": "MIT",
+    "committed_CLA_DCO_template": "NOT_FOUND",
+    "personal_agreements_signed": false,
+    "actual_required_branch_protection_checks": "UNKNOWN: protection API404 and rulesets[] do not disclose hidden/org policy",
+    "PR_CI_jobs": [
+      "build_ubuntu",
+      "build_ubuntu_24",
+      "build_macos_aarch",
+      "build_windows",
+      "check_aarch64_linux_stopwatch",
+      "flake-check"
+    ],
+    "PR_CI_executed": "NOT_RUN (no PR authorized)",
+    "community_profile": "contributing, code_of_conduct, pull_request_template null; no public legal/signoff requirement found"
+  },
+  "open_PR_duplicate_audit": {
+    "count": 14,
+    "translator_path_PRs": [
+      1041,
+      1035,
+      994,
+      562
+    ],
+    "equivalent_successor_fix_found": false,
+    "receipt": "OPEN-PR-AUDIT.json",
+    "receipt_sha256": "e4773f41e166e3985fc327aa5323e4be0a8f7625a52e7d098edcdd307ace23b2"
+  },
+  "initial_check": {
+    "checked_utc": "2026-10-09T18:38:18Z",
+    "head": "f76012fb518703b1d98e243ac4f487f16877cfcb",
+    "same_as_validated_base": true
+  },
+  "final_advance": {
+    "commit": "0a83dba42db7ce0b445034ece5298afe980e57dc",
+    "title": "[Nix] Clean up and extend flake (#1039)",
+    "merge_base": "f76012fb518703b1d98e243ac4f487f16877cfcb",
+    "prospective_merge_tree": "70478c6077d3b9d241ce7e49b8666742a227fd13",
+    "merged_profile_execution": "NOT_RUN",
+    "raw_receipt": "UPSTREAM-ADVANCE.json"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "first_build": "f7c56eca-96b8-41ac-ad99-1819e72798e0",
+  "first_infra_source": "3ad796b6cfbf9f5e349c637a38daef26f5d47822",
+  "specific_failure": "make: C++ exporter preparation exited127, cmake not found; native selected/Rust suite passed",
+  "fix_commits": [
+    "4b6864b5462f4fe131d6966d1b9848c02a78d6c3",
+    "4621d657a5879e3cac70ad69eb5f2c1afb78be44"
+  ],
+  "second_infra_source": "4621d657a5879e3cac70ad69eb5f2c1afb78be44",
+  "scope": "PR lane only: cmake/ninja, checksum-pinned upstream LLVM/Clang dependency bootstrap, real normal make test (no -o suppression), capture/audit postmake components",
+  "llvm_archive_url": "https://github.com/verifast/vf-llvm-clang-build/releases/download/v3/vf-llvm-clang-build-5710e1b-Linux.tar.gz",
+  "llvm_archive_sha256": "7bc39ea82589679a10a4d03cbd7e1d032fffb644774aff60a46bdf973171ef7a",
+  "source": "upstream setup-build.sh atf76012fb518703b1d98e243ac4f487f16877cfcb",
+  "static_service_checks": "PASS; accepted audit JSON path includes dependency/setup/components receipts",
+  "payload_sha256": "e898896037597d4a3811e35ac624b4dab63b8818416728d64f452d30cb482dde",
+  "implementation_or_fixture_changes": false
+}

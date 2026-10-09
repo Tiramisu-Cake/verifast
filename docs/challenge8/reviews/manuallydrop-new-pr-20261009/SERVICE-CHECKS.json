@@ -1,0 +1,18 @@
+{
+  "infra_sha": "3ad796b6cfbf9f5e349c637a38daef26f5d47822",
+  "compiler_or_verifier_execution": false,
+  "synthetic_trace_controls": 7,
+  "synthetic_stage_controls": 7,
+  "accepted_audit_json_serialization": true,
+  "phase_admission_controls": 4,
+  "phase_controls_evidence": "worker executed phase-test at AUTHORIZED before submit; unchanged control.py between d231 and3ad",
+  "service_log_sha256": "869c57d76a91b4db85adc419574c4051bf0863845da036624d22de7b7b54f988",
+  "input_hashes": {
+    "test-verifast-mdnew-upstream-pr.py": "21c778167abdcbf8ebe1c3efaf55a057bf6c0d34f42070e2eac8b9acbdd13b31",
+    "mdnew-upstream-pr-audit.py": "71d0d05e6392dac3794b71c61849a178b11fd51017d715d0454911c11001c99e",
+    "verifast-upstream-pr-phase-test.py": "b31b9c25f3df2a6aaccd04a250d9153ac88336c852947668281b4bbb2c31df81",
+    "control.py": "90f75edc960e3d093edce618fd1812fdaf681250ee3a7ce073cb87a8bd15d072",
+    "run-verifast-mdnew-cfg.sh": "539a07b3a6e6e7aa62ad480a0f1a44fe8dbf285309ff7eae3603627e6522bf74"
+  },
+  "result": "PASS"
+}

@@ -1,0 +1,29 @@
+{
+  "reviewer": "Independent built-in GPT-6 Sol",
+  "reviewed_sha": "d23134e45fc9524f269a71615b60d7f4b5e792f5",
+  "findings": [
+    {
+      "defect": "success result contained case-trace bytes because trace summary was shadowed",
+      "fix": "preserve trace_summary, per-fixture case_trace",
+      "status": "FIXED"
+    },
+    {
+      "defect": "successful make test manifest retained125 rather than exit0",
+      "fix": "set make_status0 on attempted stage,125 on skipped branch",
+      "status": "FIXED"
+    }
+  ],
+  "local_preflight_issue": "recipe paths unsorted; rejected before reservation/API create; fixed sorted arrays",
+  "corrected_sha": "3ad796b6cfbf9f5e349c637a38daef26f5d47822",
+  "validation": [
+    "7 synthetic command-trace controls",
+    "7 synthetic stage receipt controls",
+    "audit accepted-result JSON serialization with synthetic cases and mocked provenance/stage readers",
+    "4 phase admission controls",
+    "shell/Python syntax and diff check",
+    "real pinned-object payload and Cloud config serialization; no Cloud execution in service checks"
+  ],
+  "final_payload_sha256": "10ea0e25e774ca228d13a03c7539176fbcda1b14fd96b8e9427073d8ecb917fe",
+  "final_payload_bytes": 89227,
+  "cloud_execution": "see CHECKS.md/phase ledger for authoritative runtime result"
+}

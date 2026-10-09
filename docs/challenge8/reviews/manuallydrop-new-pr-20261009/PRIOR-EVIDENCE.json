@@ -1,0 +1,86 @@
+{
+  "publication": "741948b5a16c22107b3af67a9060f3de6e0446f0",
+  "checkpoint": "1ed4796684a60f42797a7fcfe369263173cfc6f1",
+  "inputs_equal_reason": "INPUT-MAPPING.json records only README/native registration differ; translator, specs, exporter, all other source and five fixtures identical to executed 8f pin. No new structural execution claimed.",
+  "files": [
+    {
+      "path": "GATES.md",
+      "url": "https://github.com/Tiramisu-Cake/verify-rust-std/blob/741948b5a16c22107b3af67a9060f3de6e0446f0/research/verifast-review/1ed4796684a60f42797a7fcfe369263173cfc6f1/GATES.md",
+      "bytes": 3756,
+      "sha256": "4af45979fb6b32a0c69675bcac5b53b62add28e2a8c0f7c21e58ecdbc1fc645b"
+    },
+    {
+      "path": "manifest.json",
+      "url": "https://github.com/Tiramisu-Cake/verify-rust-std/blob/741948b5a16c22107b3af67a9060f3de6e0446f0/research/verifast-review/1ed4796684a60f42797a7fcfe369263173cfc6f1/manifest.json",
+      "sha256": "d49cf2091de22b0b387951d7d0a2e9824bd508366e08daee38fc9d9c1289abd1"
+    },
+    {
+      "path": "evidence/8dd10da5-8a6b-40d7-88e2-7f4271324f17/evidence.tar.gz",
+      "url": "https://github.com/Tiramisu-Cake/verify-rust-std/blob/741948b5a16c22107b3af67a9060f3de6e0446f0/research/verifast-review/1ed4796684a60f42797a7fcfe369263173cfc6f1/evidence/8dd10da5-8a6b-40d7-88e2-7f4271324f17/evidence.tar.gz",
+      "bytes": 607125,
+      "sha256": "723a0e08ed79880e1d94e5bb3e3a4222c8fef0f18d90fd3830e1b0854cb55c76"
+    },
+    {
+      "path": "evidence/8dd10da5-8a6b-40d7-88e2-7f4271324f17/proof-audit-replay.json",
+      "url": "https://github.com/Tiramisu-Cake/verify-rust-std/blob/741948b5a16c22107b3af67a9060f3de6e0446f0/research/verifast-review/1ed4796684a60f42797a7fcfe369263173cfc6f1/evidence/8dd10da5-8a6b-40d7-88e2-7f4271324f17/proof-audit-replay.json",
+      "bytes": 1612,
+      "sha256": "61ae88b89d8f321d4b18610c34cc73eb8666669c407345d19c2eb9d68b3690dc"
+    },
+    {
+      "path": "evidence/38b9ad73-55de-452e-9213-bbe4be886562/evidence.tar.gz",
+      "url": "https://github.com/Tiramisu-Cake/verify-rust-std/blob/741948b5a16c22107b3af67a9060f3de6e0446f0/research/verifast-review/1ed4796684a60f42797a7fcfe369263173cfc6f1/evidence/38b9ad73-55de-452e-9213-bbe4be886562/evidence.tar.gz",
+      "bytes": 189650,
+      "sha256": "0254c70874e4a4cef22b2e578e3751885213e4f7ac5ea67bf8b66d0ffbf54f44"
+    }
+  ],
+  "builds": [
+    {
+      "accounted": true,
+      "archive_sha256": "723a0e08ed79880e1d94e5bb3e3a4222c8fef0f18d90fd3830e1b0854cb55c76",
+      "build_id": "8dd10da5-8a6b-40d7-88e2-7f4271324f17",
+      "build_seconds": 351,
+      "create_time": "2026-10-09T17:20:43.856427370Z",
+      "dispatch_token": "dispatch-c41b0dcb48a64ff99aa756fcf7d7116e",
+      "download_verified": true,
+      "execution_seconds": 350,
+      "finish_time": "2026-10-09T17:26:34.075583Z",
+      "infra_sha": "cf938bb31348c598de3d261f4169fa13a4bd11ab",
+      "lane": "verifast-mdnew-cfg",
+      "owner": "verifast",
+      "phase_id": "VERIFAST-MDNEW-VALIDATION-CLOUD-2026-10-09",
+      "proof_sha": "cf938bb31348c598de3d261f4169fa13a4bd11ab",
+      "publish_text_logs": true,
+      "reserved_seconds": 1260,
+      "source_input_sha256": "ec70c4159a43576a805aa86e7480c54e3e9cdb1bf2fd24388add2f66c408252e",
+      "source_mode": "pinned-objects",
+      "start_time": "2026-10-09T17:20:44.624066762Z",
+      "status": "SUCCESS",
+      "submitted_config_sha256": "547f60711edec0c8a8c4798ef022fdb46eaaa0b81e1f8ad028655af8e9fec98b",
+      "timeout_seconds": 1200
+    },
+    {
+      "accounted": true,
+      "archive_sha256": "0254c70874e4a4cef22b2e578e3751885213e4f7ac5ea67bf8b66d0ffbf54f44",
+      "build_id": "38b9ad73-55de-452e-9213-bbe4be886562",
+      "build_seconds": 353,
+      "create_time": "2026-10-09T17:41:29.697139768Z",
+      "dispatch_token": "dispatch-462fb37af85947deb11554cbd15f0a02",
+      "download_verified": true,
+      "execution_seconds": 352,
+      "finish_time": "2026-10-09T17:47:22.018637Z",
+      "infra_sha": "09f8fea4ab3ad987c66e68cd6e7405c9de278161",
+      "lane": "verifast-mdnew-regressions",
+      "owner": "verifast",
+      "phase_id": "VERIFAST-MDNEW-VALIDATION-CLOUD-2026-10-09",
+      "proof_sha": "09f8fea4ab3ad987c66e68cd6e7405c9de278161",
+      "publish_text_logs": true,
+      "reserved_seconds": 1260,
+      "source_input_sha256": "00e5c486f6e2649e39173e6cdd95b0ded6ab7dea39f756522b76459b6284ea33",
+      "source_mode": "pinned-objects",
+      "start_time": "2026-10-09T17:41:30.461256403Z",
+      "status": "SUCCESS",
+      "submitted_config_sha256": "19923c49e5de959f53ca66c2e94fc955e890adba16f7e48defc8566bbd0317f7",
+      "timeout_seconds": 1200
+    }
+  ]
+}

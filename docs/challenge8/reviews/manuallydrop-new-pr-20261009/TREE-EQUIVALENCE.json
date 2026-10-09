@@ -1,0 +1,61 @@
+{
+  "verified_pin": "8f0b701e9f2a3da124372c5d37d4cda408d45001",
+  "head": "da4beb61a6c2dd0e80fe4a74c5c230f3adac7cab",
+  "base": "f76012fb518703b1d98e243ac4f487f16877cfcb",
+  "changed_paths": [
+    "tests/rust/purely_unsafe/manuallydrop_new_cfg/README.md",
+    "tests/rust/testsuite.mysh"
+  ],
+  "identical_subtrees": {
+    "src": {
+      "verified_pin_tree": "5f9202a9b8fe8169f6da69f8ac56adb3ae9a0afc",
+      "prepared_head_tree": "5f9202a9b8fe8169f6da69f8ac56adb3ae9a0afc",
+      "equal": true
+    },
+    "bin": {
+      "verified_pin_tree": "3724b0a679358a822408c1ff707fab1b9381570a",
+      "prepared_head_tree": "3724b0a679358a822408c1ff707fab1b9381570a",
+      "equal": true
+    }
+  },
+  "identical_files": {
+    "src/rust_frontend/vf_mir_translator/vf_mir_translator.ml": {
+      "verified_pin_blob": "03e7e4079fa3424d1be80a4d0b5d620b899a937f",
+      "prepared_head_blob": "03e7e4079fa3424d1be80a4d0b5d620b899a937f",
+      "sha256": "a15a743c4106891e2fde892e26dd3ab2ab87adca04c12b333e6000c4c063509f",
+      "equal": true
+    },
+    "tests/rust/purely_unsafe/manuallydrop_new_cfg/forget.rs": {
+      "verified_pin_blob": "0cb379e42fe6bd821d5e0d6dd750097b682565d9",
+      "prepared_head_blob": "0cb379e42fe6bd821d5e0d6dd750097b682565d9",
+      "sha256": "2a6f0d16bd29cc9ea6c10e3b63e6b94000249d72e94d64f99d45cefb277ce1f7",
+      "equal": true
+    },
+    "tests/rust/purely_unsafe/manuallydrop_new_cfg/shared_cleanup.rs": {
+      "verified_pin_blob": "45c97e151bb09a8ec737acfd412777b1cca3e402",
+      "prepared_head_blob": "45c97e151bb09a8ec737acfd412777b1cca3e402",
+      "sha256": "e3f91c8a2e0dfa9a1c281350b59318b5553847b1940add46d44061662d456d33",
+      "equal": true
+    },
+    "tests/rust/purely_unsafe/manuallydrop_new_cfg/false_normal_post.rs": {
+      "verified_pin_blob": "0ede897d6f2b76e785dd5245d82c4ac808bf636f",
+      "prepared_head_blob": "0ede897d6f2b76e785dd5245d82c4ac808bf636f",
+      "sha256": "23a1360b673fe6ece1f8903e69aae104f9e8dadfc34061d09062a993f6071f0d",
+      "equal": true
+    },
+    "tests/rust/purely_unsafe/manuallydrop_new_cfg/shared_false_unwind.rs": {
+      "verified_pin_blob": "221c061f2ea3290d4424376b03f26b401890a636",
+      "prepared_head_blob": "221c061f2ea3290d4424376b03f26b401890a636",
+      "sha256": "24c003dcb4f99c8bec2240dc3a61d5747f8c96b27b518686a0dbe32aef1158db",
+      "equal": true
+    },
+    "tests/rust/purely_unsafe/manuallydrop_new_cfg/dead_code_pre.rs": {
+      "verified_pin_blob": "a54649df69fde7cdfb6d523a128aed296e61dbba",
+      "prepared_head_blob": "a54649df69fde7cdfb6d523a128aed296e61dbba",
+      "sha256": "b1317808274abeca09fc9b5b4e9079c7426822347205970217123993e0af70c2",
+      "equal": true
+    }
+  },
+  "complete_diff_matches_prepared_head": true,
+  "execution_credit": "prior exact evidence applied by equality; new native registration credited only by fresh Build"
+}

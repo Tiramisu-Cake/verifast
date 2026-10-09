@@ -1,3 +1,29 @@
+# Current task — standalone upstream PR review preparation
+
+The original successor-inventory implementation was developed by the proof agent
+at e6c02f22420ba4ff6a77e39c9610708a6096e7d7 and used in an experimental profile
+with historical O1 evidence before this maintainer role. Transplant227dc163 is
+unchanged. Maintainer review and later test package8f0b701e add separate review,
+stronger controls and exact delivery; they do not create a new semantic repair.
+Previous consumer NOT_ACCEPTED labels concern a separate delivery/profile,
+not absence of earlier use. Reaccepting unchanged implementation by the proof
+agent is not an upstream preparation gate. Actual mem::forget/caller proof work
+remains separately owned; no proof pins or ledgers are changed here.
+
+Clean local PR branch: upstream/manuallydrop-new-successors, worktree
+/root/verifast-mdnew-pr, head da4beb61a6c2dd0e80fe4a74c5c230f3adac7cab.
+This is the sole active owner/location for the submission variant; the validated
+review/test variant and proof-agent experiment remain preserved separate sources.
+[Review material](../reviews/manuallydrop-new-pr-20261009/REVIEW.md) and current
+[STATUS](../STATUS.md) record native checks and exact package checkpoint.
+No upstream publication is authorized in this session, including draft PR/fork.
+Current verdict CHANGES_REQUIRED: native registration/full Rust passed, but full
+Linux make test stopped at650s. Next: complete that unchanged-head check in a
+separately authorized Cloud phase, then review exact head/body and await approve.
+
+Historical checkpoints follow. Their next assignments and NOT_RUN describe the
+corresponding earlier session, not standing requirements for this preparation.
+
 # Current handoff — focused validation completed
 
 **FOCUSED_VALIDATION_PASS**, tool/tests8f0b701e9f2a3da124372c5d37d4cda408d45001;

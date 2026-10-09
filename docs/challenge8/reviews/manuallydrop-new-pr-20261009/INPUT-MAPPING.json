@@ -1,0 +1,54 @@
+{
+  "base": "f76012fb518703b1d98e243ac4f487f16877cfcb",
+  "base_changed": false,
+  "branch": "refs/heads/upstream/manuallydrop-new-successors",
+  "bundle_sha256": "10f0afdc4457e919929eebd7333f57944d76e1fce5da4a04ee2914f659d7c189",
+  "changed_paths_from_verified_pin": [
+    "tests/rust/purely_unsafe/manuallydrop_new_cfg/README.md",
+    "tests/rust/testsuite.mysh"
+  ],
+  "commits": [
+    {
+      "author_date": "2026-10-08T01:48:16+03:00",
+      "author_email": "root@03ohba7t.vm",
+      "author_name": "root",
+      "committer_date": "2026-10-09T21:39:14+03:00",
+      "committer_email": "root@03ohba7t.vm",
+      "committer_name": "root",
+      "sha": "8afd5e561d25aaa58ae1585588d65de7989ae431",
+      "subject": "Rust: align ManuallyDrop::new successors with its identity CFG"
+    },
+    {
+      "author_date": "2026-10-09T21:39:15+03:00",
+      "author_email": "root@03ohba7t.vm",
+      "author_name": "root",
+      "committer_date": "2026-10-09T21:39:45+03:00",
+      "committer_email": "root@03ohba7t.vm",
+      "committer_name": "root",
+      "sha": "da4beb61a6c2dd0e80fe4a74c5c230f3adac7cab",
+      "subject": "Rust: register ManuallyDrop identity and unwind regressions"
+    }
+  ],
+  "final_cloud_result": {
+    "build_id": "43b2f7fc-f089-476b-8690-ef8ed84129ee",
+    "full_rust_testsuite": "PASS",
+    "implementation_changed": false,
+    "linux_make_test": "NOT_RUN_TIMEOUT",
+    "native_registration": "PASS",
+    "verdict": "CHANGES_REQUIRED"
+  },
+  "fixture_bytes_changed": false,
+  "head": "da4beb61a6c2dd0e80fe4a74c5c230f3adac7cab",
+  "history": "two clean commits; original translator author identity/date from source e6c02f preserved",
+  "implementation_changed": false,
+  "manifest_sha256": "0c8f7a224816cee2b013cae07ce48c16d2f9dad8102ee27e848772e095a7ea83",
+  "new_head_cloud_execution": "Native selected registration and full Rust suite PASS in both f7c56eca-96b8-41ac-ad99-1819e72798e0 and43b2f7fc-f089-476b-8690-ef8ed84129ee. First full make lacked cmake; corrected repeat terminated at650s during root suite: NOT_RUN_TIMEOUT.",
+  "prior_evidence_application": "same base, all code/specs/exporter/translator and Rust fixture bytes; prior focused structure/negative/positive and targeted regressions apply to identical significant inputs. New SHA alone is not new execution. Native registration requires fresh execution.",
+  "readme": "upstream explanation/commands replacing historical research status",
+  "registration_only_addition": "! verifast dead_code_pre.rs",
+  "runtime_equivalence": "First new-head candidate console SHA256 fb9f110b32db277eb5642d0f9e18880717f7859ce334aa49c3a82a52aad9ef70 equals executed8f console; baseline, stock executors/specs/compiler likewise identical. See RUNTIME-EQUIVALENCE.json.",
+  "same_translator_and_all_five_fixture_bytes": true,
+  "significant_other_source_inputs_identical": true,
+  "tree": "50481095a79cb8f517fb61c0a4aa5d026b591b91",
+  "verified_pin": "8f0b701e9f2a3da124372c5d37d4cda408d45001"
+}

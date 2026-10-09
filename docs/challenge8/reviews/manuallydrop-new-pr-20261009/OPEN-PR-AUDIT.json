@@ -1,0 +1,75 @@
+{
+  "retrieved_utc_date": "2026-10-09",
+  "scope": "Read-only GitHub REST inspection; upstream master remains f76012fb518703b1d98e243ac4f487f16877cfcb; no writes to repository or GitHub.",
+  "open_pr_list": {
+    "url": "https://api.github.com/repos/verifast/verifast/pulls?state=open&per_page=100",
+    "count": 14,
+    "cache_path": null,
+    "note": "Live gh api response, no persistent response cache requested."
+  },
+  "open_prs_touching_rust_mir_translator": [
+    {
+      "id": 4776123360,
+      "number": 1041,
+      "url": "https://github.com/verifast/verifast/pull/1041",
+      "head_sha": "0fb63506a51cae559ae92348eb54ba7f7be0bf6d",
+      "changed_path": "src/rust_frontend/vf_mir_translator/vf_mir_translator.ml",
+      "patch_summary": "Adds integral=false fields to generic parameter bounds for C++20 concepts work. No cleanup/drop/ManuallyDrop behavior."
+    },
+    {
+      "id": 4760117867,
+      "number": 1035,
+      "url": "https://github.com/verifast/verifast/pull/1035",
+      "head_sha": "9c683a252c84a224aca17e9ce43eb74b2685ce4b",
+      "changed_path": "src/rust_frontend/vf_mir_translator/vf_mir_translator.ml",
+      "patch_summary": "Supports AggregateKind::RawPtr slice pointees; no cleanup/drop/ManuallyDrop behavior."
+    },
+    {
+      "id": 3289661995,
+      "number": 994,
+      "url": "https://github.com/verifast/verifast/pull/994",
+      "head_sha": "b5193bd066fa18e9b298f5a57d45e064ad095fad",
+      "changed_path": "src/rust_frontend/vf_mir_translator/vf_mir_translator.ml",
+      "patch_summary": "Adds ownership expression for Rust arrays; no cleanup/drop/ManuallyDrop behavior."
+    },
+    {
+      "id": 2044584700,
+      "number": 562,
+      "url": "https://github.com/verifast/verifast/pull/562",
+      "head_sha": "b1e01be04cdac27a8238e5b8dcd2b9068c8b9edc",
+      "changed_path": "src/rust_frontend/vf_mir_translator/vf_mir_translator.ml",
+      "patch_summary": "Adds a TODO on precise full-borrow-content predicates; tutorial additions elsewhere. No cleanup/drop/ManuallyDrop behavior."
+    }
+  ],
+  "historical_related_pr": {
+    "id": 1691735342,
+    "number": 420,
+    "url": "https://github.com/verifast/verifast/pull/420",
+    "state": "closed",
+    "head_sha": "9978efe6e7b0c4e643507e9dea73b173c2f26095",
+    "title": "[Rust] Support locals that impl Drop; ManuallyDrop",
+    "changed_paths": [
+      "src/rust_frontend/vf_mir/vf_mir.capnp",
+      "src/rust_frontend/vf_mir_exporter/src/lib.rs",
+      "src/rust_frontend/vf_mir_translator/vf_mir_translator.ml",
+      "tests/rust/safe_abstraction/tree.rs"
+    ],
+    "body_summary": "Support based on drop-elaborated MIR; explicitly said implicit drops not yet supported."
+  },
+  "community_profile": {
+    "url": "https://api.github.com/repos/verifast/verifast/community/profile",
+    "contributing": null,
+    "code_of_conduct": null,
+    "pull_request_template": null,
+    "license": "LICENSE.md (MIT text)",
+    "cache_path": null
+  },
+  "repo_rules": {
+    "branch_protection_url": "https://api.github.com/repos/verifast/verifast/branches/master/protection",
+    "branch_protection_result": "HTTP 404 Not Found; cannot distinguish absent protection from API visibility limits",
+    "rulesets_url": "https://api.github.com/repos/verifast/verifast/rulesets",
+    "rulesets_result": [],
+    "cache_path": null
+  },
+  "conclusion": "No open PR among the 14 listed is an equivalent successor cleanup fix. PRs 1041, 1035, 994, and 562 are the only open PRs found changing the Rust MIR translator; their patches are unrelated. No repo-level CLA/DCO/signoff requirement is disclosed by committed files or community-profile metadata; organization-level policy cannot be ruled out from this public read."
+}

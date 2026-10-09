@@ -1,20 +1,16 @@
-# Next bounded consumer check
+# Separate proof work, not an upstream preparation gate
 
-Consumer owner authorizes a new Cloud phase and budget. Freeze tool/test commit
-8f0b701e9f2a3da124372c5d37d4cda408d45001, upstream base
-f76012fb518703b1d98e243ac4f487f16877cfcb and the complete effective Rust/spec
-profile, including specialization mappings. Restore the exact bundled Git input;
-check base/tree/translator/test identities and runtime component hashes.
+The original patch was developed by the proof agent in e6c02f22420ba4ff6a77e39c9610708a6096e7d7
+and used in an experimental profile before the maintainer transfer. Historical
+O1 evidence already existed. The unchanged translator transplant and later
+8f0b701e tool/test package do not represent a new semantic implementation.
+Prior NOT_ACCEPTED applies to a separate new distribution, not to absence of
+prior use, and does not impose mandatory reacceptance of the unchanged patch.
 
-Verify the actual generic `mem::forget` helper used by the proof source, then its
-ordinary and shared-cleanup callers with the intended resource/thread-token and
-lifetime contracts. Preserve mandatory dead-code checking and function-bound
-MIR/caller-AST unwind gates. Record exact source/proof/spec SHA and expected
-normal/unwind behavior, return/leak checks and negative controls. No historical
-focused result counts as execution of the consumer source. Refiner unwind TODO
-still requires an explicit structural/correspondence argument.
-
-Consumer acceptance is decided by that proof owner from fresh evidence. This
-maintainer session did not change consumer pins or accept a larger SmallSort
-profile. Upstream PR publication remains a separate authorized action; its draft
-is prepared. No full historical O1 audit or three-slot demonstration is needed.
+Actual generic mem::forget and its caller resource/source obligations remain
+owned by the proof agents as separate proof work. They are not an automatic
+prerequisite for preparing this standalone successor-inventory PR. This session
+changes no proof pin or profile and assigns no new proof task to another agent.
+The active next step is completing the unchanged-head Linux make test after its
+timeout, then user/independent review of the prepared PR head/body and separate
+explicit approve before any upstream publication.

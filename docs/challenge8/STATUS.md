@@ -1,17 +1,51 @@
-# Checkpoint: ManuallyDrop::new focused validation
+# Checkpoint: ManuallyDrop::new upstream review package
 
-2026-10-09. **FOCUSED_VALIDATION_PASS**. Exact source-built baseline reproduces the orphan cleanup dead-code defect; candidate passes generic forget and retains ordinary/shared unwind. All mandatory focused gates passed, including exact false-post diagnostics, original should_fail fixtures and mandatory dead-code control. Five targeted native upstream regressions passed. Delivery and compilation PASS; full upstream suite and consumer integration NOT_RUN; consumer/upstream acceptance NOT_ACCEPTED.
+2026-10-09. **CHANGES_REQUIRED**. Proposed local/bundle-only head `da4beb61a6c2dd0e80fe4a74c5c230f3adac7cab`,
+base `f76012fb518703b1d98e243ac4f487f16877cfcb`, target verifast/verifast:master. No upstream PR, draft, public fork,
+PR branch, issue, comment or maintainer message published.
+Current upstream master is 0a83dba42db7ce0b445034ece5298afe980e57dc (#1039);
+tested/merge base remains f760. Static merge tree70478c6077d3b9d241ce7e49b8666742a227fd13
+is conflict-free; its combined execution is NOT_RUN. Fresh merged-profile CI
+is required before merge acceptance; no new-master execution credit is claimed. Separate user review
+and explicit approve must cover this exact head, title and PR body SHA256 `061c0a60da843851f4f15e81f72cd1cd7bd2ba3e5d35d14760124fa20d2357d9`.
 
-Tool/test pin8f0b701e9f2a3da124372c5d37d4cda408d45001, basef76012fb518703b1d98e243ac4f487f16877cfcb; translator227dc163117e85d89fb1877bfc1e239a0628e5ab unchanged. Test-only fc03ad9e5ab3404398404f3bba9d7bcacec01c43 and8f0b701 repair expected-failure traversal using a normal-first tail expression and matching positive control. Focused infra=sourcecf938bb31348c598de3d261f4169fa13a4bd11ab includes the capture-log correction; regression infra=source09f8fea4ab3ad987c66e68cd6e7405c9de278161 fixes case-evidence packaging.
+Original implementation: proof-agent commit e6c02f22420ba4ff6a77e39c9610708a6096e7d7,
+used in an experimental profile and historical O1 before this maintainer role.
+Unchanged transfer227dc163117e85d89fb1877bfc1e239a0628e5ab; verified tool/test pin
+8f0b701e9f2a3da124372c5d37d4cda408d45001 added separate review/stronger tests,
+not new translator semantics. Prior consumer NOT_ACCEPTED concerns the separate
+new distribution, not absence of prior experimental use. Reacceptance of the
+unchanged patch is not a mandatory upstream-preparation task. Actual generic
+mem::forget and caller resource obligations remain separate proof work.
 
-Builds:28c02b79-8834-46e4-9f24-c3b1282476b0 FAILURE346s (diagnostic fixture attempt),8dd10da5-8a6b-40d7-88e2-7f4271324f17 SUCCESS351s (focused),b5c898e4-4049-4770-9d73-424703c8168c FAILURE372s (packaging),38b9ad73-55de-452e-9213-bbe4be886562 SUCCESS353s (upstream targeted). New independent phase CLOSED **1422/3600s**, remaining2178; all terminal/accounted/download-verified, own reservations/unresolved0. Historical phase CLOSED786/3600 and2814 remainder unchanged and not inherited.
+Clean PR history: implementation8afd5e561d25aaa58ae1585588d65de7989ae431 plus tests
+da4beb61a6c2dd0e80fe4a74c5c230f3adac7cab. Translator and five fixture bytes equal8f; full src/bin subtrees equal;
+changes versus8f are README/native dead-code registration and history packaging.
+Author/committer root <root@03ohba7t.vm> preserved/recorded; no invented identity.
+No Cloud, budgets, organizational instructions or proof profiles in PR branch.
 
-Actual session16:56:51UTC, main17:56:51UTC, absolute18:26:51UTC. Live coordinatorv2/max2; client ACKs absent and three-slot migration NOT_RUN. Exact peer adoption instructions and gates are in [current session record](cloud/verifast-mdnew-validation-20261009.md).
+Prior focused Build8dd10da5 and targeted5 Build38b9ad73 apply by exact significant
+input equality; first new-head compiled consoles and all stock/compiler/spec
+components also match. New native registration/fullRust: PASS in both new Builds, including full Rust suite.
+Linux make test: NOT_RUN_TIMEOUT650s during root suite; mandatory preparation blocker. Other platform/Rocq/Nix CI NOT_RUN; no PR exists.
+Refiner unwind TODO and existing trusted identity/name recognition remain.
 
-Sole active owner of this review/test variant: maintainer at /root/verifast-mdnew-validation, branch challenge8/mdnew-focused-validation. Previous review worktree remains preserved as historical source. Proof agents retain their experimental profiles; no proof branches/files/indexes/pins or ledgers changed. Own infra branch infra/verifast-mdnew-cfg and immutable review/verifast package are published; exact organizational checkpoint and publication hashes are separate manifest fields. Prior checkpoint a87bfb4f6e9f45cf221b6f4b7c58315a0fb00f47 / publication50830c7c9f098d8d65df5592dc5e03219d657b89 preserved.
+New phase CLOSED 1762/3600s, remaining1838;
+all own submissions terminal/accounted/download-verified, own reservations and
+unresolved0. Builds: f7c56eca-96b8-41ac-ad99-1819e72798e0 FAILURE 482s, 43b2f7fc-f089-476b-8690-ef8ed84129ee SUCCESS 1280s. First no-build recipe preflight charged0s.
+Executed native infra/source3ad796b6cfbf9f5e349c637a38daef26f5d47822 and full-make
+repeat4621d657a5879e3cac70ad69eb5f2c1afb78be44; organizational infra checkpoint
+1b17e617238334376e28143b8ddbeee21b1804ed is distinct. Coordinatorv2/max2; migration not a goal.
+Start18:34:08UTC, main19:34:08UTC, finish20:04:08UTC; no new Builds after main cutoff.
 
-[Fresh fixture/evidence review](reviews/manuallydrop-new-focused-20261009/FIXTURE-REVIEW.md), [updated PR draft](reviews/manuallydrop-new-cfg-20261009/PR-DRAFT.md), [historical session](cloud/verifast-mdnew-20261009.md). Upstream PR/issues remain unpublished. Focused PASS qualifies this bounded test result, not a consumer proof profile or upstream acceptance. Refiner unwind correspondence TODO remains.
+Active variant owner: maintainer at /root/verifast-mdnew-pr,
+branch upstream/manuallydrop-new-successors. Historical validation worktree and
+immutable packages preserved. No proof branches/pins/ledgers/worktrees changed.
 
-Next assignment: Consumer owner: frozen 8f0b701e tool/test bundle against actual generic mem::forget helper and ordinary/shared cleanup callers, with source/spec profile and ownership resources explicitly checked; new authorized Cloud phase, no automatic proof pin adoption.
-
-Organizational infrastructure checkpoint: bc8e9b41baab5bfa39bac81f30b74f9878c6b565. Executed infra/source pins above are distinct from this documentation/accounting commit.
+[Review](reviews/manuallydrop-new-pr-20261009/REVIEW.md),
+[exact proposed PR](reviews/manuallydrop-new-pr-20261009/PR-DRAFT.md),
+[checks](reviews/manuallydrop-new-pr-20261009/CHECKS.md),
+[session](cloud/verifast-mdnew-upstream-pr-20261009.md).
+Next assignment: complete the unchanged-head Linux make test in a separately
+authorized Cloud phase, then update this exact review package and obtain independent
+review/user approve. Git attribution must be approved before upstream publication.

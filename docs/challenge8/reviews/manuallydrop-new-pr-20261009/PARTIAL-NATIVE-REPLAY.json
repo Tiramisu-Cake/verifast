@@ -1,0 +1,24 @@
+{
+  "build_id": "f7c56eca-96b8-41ac-ad99-1819e72798e0",
+  "infra_source_sha": "3ad796b6cfbf9f5e349c637a38daef26f5d47822",
+  "native_registration": "PASS",
+  "native_trace": {
+    "mysh_commands": 5,
+    "dead_code_diagnostic": true
+  },
+  "full_rust_testsuite": "PASS",
+  "make_test": "FAILED_BEFORE_ROOT_SUITE: cmake missing",
+  "overall_upstream_preparation": "NOT_COMPLETE",
+  "provenance": {
+    "infra_sha": "3ad796b6cfbf9f5e349c637a38daef26f5d47822",
+    "proof_sha": "3ad796b6cfbf9f5e349c637a38daef26f5d47822",
+    "candidate": "da4beb61a6c2dd0e80fe4a74c5c230f3adac7cab",
+    "tree": "50481095a79cb8f517fb61c0a4aa5d026b591b91",
+    "bundle_sha256": "10f0afdc4457e919929eebd7333f57944d76e1fce5da4a04ee2914f659d7c189",
+    "manifest_sha256": "0c8f7a224816cee2b013cae07ce48c16d2f9dad8102ee27e848772e095a7ea83",
+    "source_certificate_sha256": "1c75310bd9fb16c4c04f6a534a77cc3f89ad063289aa5c9cb9c65c1e5c4e2db6",
+    "candidate_console_sha256": "fb9f110b32db277eb5642d0f9e18880717f7859ce334aa49c3a82a52aad9ef70"
+  },
+  "vps_scope": "read-only Git/hashes/classifier replay; no compiler/VeriFast execution",
+  "archive_sha256": "f036b6f36412f0216b44cef33c5f4054e1405cc8fc02c3f82159189c28133ffa"
+}
