@@ -1,0 +1,200 @@
+diff --git a/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml b/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
+index 4e237a61..03e7e407 100644
+--- a/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
++++ b/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
+@@ -2322,7 +2322,8 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
+ 
+     let translate_fn_call_rexpr (callee_cpn : OperandRd.t)
+         (args_cpn : OperandRd.t list) (call_loc : Ast.loc) (fn_loc : Ast.loc)
+-        (ghost_generic_arg_list_opt_cpn : OptionRd.t) =
++        (ghost_generic_arg_list_opt_cpn : OptionRd.t)
++        (manuallydrop_new_identity_lowering : bool ref) =
+       let has_closure_substs =
+         match D.decode_operand callee_cpn with
+           Constant {const = Val {ty = {kind = FnDef { id = { name }; substs }}}} ->
+@@ -2593,6 +2594,8 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
+             | "std::mem::ManuallyDrop::<T>::new"
+             | "std::mem::ManuallyDrop::deref"
+             | "std::mem::ManuallyDrop::deref_mut" ->
++                manuallydrop_new_identity_lowering :=
++                  fn_name = "std::mem::ManuallyDrop::<T>::new";
+                 let [ arg_cpn ] = args_cpn in
+                 let [ arg ] = args in
+                 Ok (tmp_rvalue_binders, FnCallResult arg)
+@@ -2683,9 +2686,10 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
+       let ghost_generic_arg_list_opt_cpn =
+         ghost_generic_arg_list_get fn_call_data_cpn
+       in
++      let manuallydrop_new_identity_lowering = ref false in
+       let* fn_call_tmp_rval_ctx, fn_call_rexpr =
+         translate_fn_call_rexpr func_cpn args_cpn loc fn_loc
+-          ghost_generic_arg_list_opt_cpn
++          ghost_generic_arg_list_opt_cpn manuallydrop_new_identity_lowering
+       in
+       let unwind_stmts, unwind_targets =
+         if TranslatorArgs.ignore_unwind_paths then ([], [])
+@@ -2793,7 +2797,13 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
+                        loc,
+                        ref [] );
+                  ]),
+-              targets @ unwind_targets )
++              (match fn_call_rexpr, terminator with
++              | FnCallResult _, Mir.GotoTerminator _
++                when !manuallydrop_new_identity_lowering ->
++                  (* The identity lowering emits only the normal assignment/goto.
++                     Keep successor inventory faithful to that emitted CFG. *)
++                  targets
++              | _ -> targets @ unwind_targets) )
+       in
+       Ok (full_call_stmts, terminator, targets)
+ 
+diff --git a/tests/rust/purely_unsafe/manuallydrop_new_cfg/README.md b/tests/rust/purely_unsafe/manuallydrop_new_cfg/README.md
+new file mode 100644
+index 00000000..5a943905
+--- /dev/null
++++ b/tests/rust/purely_unsafe/manuallydrop_new_cfg/README.md
+@@ -0,0 +1,32 @@
++# `ManuallyDrop::new` CFG regression
++
++`forget.rs` checks the minimal generic identity lowering of
++`std::mem::ManuallyDrop::new`. `shared_cleanup.rs` checks an ordinary caller and
++a generic shared-cleanup caller with a real unwind-capable call. Its local
++function named `new` is an ordinary Rust function and serves as a name-boundary
++control for the standard-library special case. Each should-fail control has a
++separate command so its expected failure cannot mask another function.
++
++Historical baseline evidence shows `shared_cleanup` passes on the pre-candidate
++translator, while the minimal `forget` case fails with orphan dead code. The
++candidate is expected to accept `forget`, the ordinary caller, and the
++shared-cleanup caller; the two negative controls should fail at their marked
++postconditions. These are documented expectations, not new verification
++results; all cases remain NOT_RUN in this worktree.
++
++The Cloud gate must inspect decoded MIR and the translated caller AST: both
++calls in `shared_cleanup` must have the same cleanup ID, and the caller AST must
++retain the actual unwind `goto` for the ordinary call. A whole-unit string
++match is insufficient. Compilation, VeriFast, and proof execution are NOT_RUN.
++
++`dead_code_pre.rs` is intentionally unregistered because the contradictory
++precondition makes the whole function dead code. Run from this directory:
++
++```text
++verifast dead_code_pre.rs
++```
++
++Expected result: exit status 1 with a dead-code diagnostic spanning the whole
++function. This is not a `req false` proof error. `mysh` does not express this
++expected exit status, so the fixture remains unregistered. Do not add
++`-allow_dead_code` or an assumption to make this case pass.
+diff --git a/tests/rust/purely_unsafe/manuallydrop_new_cfg/dead_code_pre.rs b/tests/rust/purely_unsafe/manuallydrop_new_cfg/dead_code_pre.rs
+new file mode 100644
+index 00000000..a54649df
+--- /dev/null
++++ b/tests/rust/purely_unsafe/manuallydrop_new_cfg/dead_code_pre.rs
+@@ -0,0 +1,7 @@
++pub unsafe fn forget_from_dead_precondition<T>(t: T)
++//@ req thread_token(?tid) &*& tid == currentThread &*& false;
++//@ ens thread_token(tid);
++//@ on_unwind_ens false;
++{
++    let _ = std::mem::ManuallyDrop::new(t);
++}
+diff --git a/tests/rust/purely_unsafe/manuallydrop_new_cfg/false_normal_post.rs b/tests/rust/purely_unsafe/manuallydrop_new_cfg/false_normal_post.rs
+new file mode 100644
+index 00000000..0ede897d
+--- /dev/null
++++ b/tests/rust/purely_unsafe/manuallydrop_new_cfg/false_normal_post.rs
+@@ -0,0 +1,7 @@
++pub unsafe fn forget_false_normal_post<T>(t: T)
++//@ req thread_token(?tid) &*& tid == currentThread;
++//@ ens false; //~should_fail
++//@ on_unwind_ens false;
++{
++    let _ = std::mem::ManuallyDrop::new(t);
++}
+diff --git a/tests/rust/purely_unsafe/manuallydrop_new_cfg/forget.rs b/tests/rust/purely_unsafe/manuallydrop_new_cfg/forget.rs
+new file mode 100644
+index 00000000..0cb379e4
+--- /dev/null
++++ b/tests/rust/purely_unsafe/manuallydrop_new_cfg/forget.rs
+@@ -0,0 +1,7 @@
++pub unsafe fn forget<T>(t: T)
++//@ req thread_token(?tid) &*& tid == currentThread;
++//@ ens thread_token(tid);
++//@ on_unwind_ens false;
++{
++    let _ = std::mem::ManuallyDrop::new(t);
++}
+diff --git a/tests/rust/purely_unsafe/manuallydrop_new_cfg/shared_cleanup.rs b/tests/rust/purely_unsafe/manuallydrop_new_cfg/shared_cleanup.rs
+new file mode 100644
+index 00000000..b150b3f6
+--- /dev/null
++++ b/tests/rust/purely_unsafe/manuallydrop_new_cfg/shared_cleanup.rs
+@@ -0,0 +1,26 @@
++pub unsafe fn new(b: bool)
++//@ req thread_token(?tid) &*& tid == currentThread;
++//@ ens thread_token(tid);
++//@ on_unwind_ens thread_token(tid);
++{
++    if b {
++        panic!("ManuallyDrop CFG regression");
++    }
++}
++
++pub unsafe fn ordinary_caller(b: bool)
++//@ req thread_token(?tid) &*& tid == currentThread;
++//@ ens thread_token(tid);
++//@ on_unwind_ens thread_token(tid);
++{
++    new(b);
++}
++
++pub unsafe fn shared_cleanup<T>(t: T, b: bool)
++//@ req thread_token(?tid) &*& tid == currentThread;
++//@ ens thread_token(tid);
++//@ on_unwind_ens thread_token(tid);
++{
++    let _ = std::mem::ManuallyDrop::new(t);
++    new(b);
++}
+diff --git a/tests/rust/purely_unsafe/manuallydrop_new_cfg/shared_false_unwind.rs b/tests/rust/purely_unsafe/manuallydrop_new_cfg/shared_false_unwind.rs
+new file mode 100644
+index 00000000..330439af
+--- /dev/null
++++ b/tests/rust/purely_unsafe/manuallydrop_new_cfg/shared_false_unwind.rs
+@@ -0,0 +1,18 @@
++pub unsafe fn new(b: bool)
++//@ req thread_token(?tid) &*& tid == currentThread;
++//@ ens thread_token(tid);
++//@ on_unwind_ens thread_token(tid);
++{
++    if b {
++        panic!("ManuallyDrop CFG regression");
++    }
++}
++
++pub unsafe fn shared_cleanup_false_unwind_post<T>(t: T, b: bool)
++//@ req thread_token(?tid) &*& tid == currentThread;
++//@ ens thread_token(tid);
++//@ on_unwind_ens false; //~should_fail
++{
++    let _ = std::mem::ManuallyDrop::new(t);
++    new(b);
++}
+diff --git a/tests/rust/testsuite.mysh b/tests/rust/testsuite.mysh
+index 3c5ed1da..ef3ad1b9 100644
+--- a/tests/rust/testsuite.mysh
++++ b/tests/rust/testsuite.mysh
+@@ -33,6 +33,12 @@ popd
+ verifast -ignore_ref_creation -allow_assume nonnull.rs
+ verifast -skip_specless_fns nonnull_into.rs
+ cd purely_unsafe
++  cd manuallydrop_new_cfg
++    verifast forget.rs
++    verifast shared_cleanup.rs
++    verifast -allow_should_fail false_normal_post.rs
++    verifast -allow_should_fail shared_false_unwind.rs
++  cd ..
+   verifast enum_discr.rs
+   verifast -ignore_unwind_paths leftpad.rs
+   verifast arrays.rs

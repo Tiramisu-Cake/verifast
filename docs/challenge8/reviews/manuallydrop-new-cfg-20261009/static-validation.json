@@ -1,0 +1,22 @@
+{
+  "kind": "static/Git/hash/link checks only; no compiler or proof",
+  "tool_base": "f76012fb518703b1d98e243ac4f487f16877cfcb",
+  "candidate": "1435539475fdaa7810bc2bc780fba0514f765f48",
+  "translator_sha256": "a15a743c4106891e2fde892e26dd3ab2ab87adca04c12b333e6000c4c063509f",
+  "unchanged_transplant": "OK",
+  "candidate_tree_equals_final_development_tree": "OK",
+  "allowed_diff_paths": [
+    "src/rust_frontend/vf_mir_translator/vf_mir_translator.ml",
+    "tests/rust/purely_unsafe/manuallydrop_new_cfg/README.md",
+    "tests/rust/purely_unsafe/manuallydrop_new_cfg/dead_code_pre.rs",
+    "tests/rust/purely_unsafe/manuallydrop_new_cfg/false_normal_post.rs",
+    "tests/rust/purely_unsafe/manuallydrop_new_cfg/forget.rs",
+    "tests/rust/purely_unsafe/manuallydrop_new_cfg/shared_cleanup.rs",
+    "tests/rust/purely_unsafe/manuallydrop_new_cfg/shared_false_unwind.rs",
+    "tests/rust/testsuite.mysh"
+  ],
+  "relative_links": "OK",
+  "test_fixture_patch_debris_scan": "OK",
+  "new_tests": "NOT_RUN",
+  "builds": "NOT_RUN"
+}

@@ -1,0 +1,12 @@
+{
+  "kind": "isolated Git-only bundle receive/object checks; no compiler/proof execution",
+  "repository": "/tmp/verifast-bundle-restore-j3ovg4i6/tool.git",
+  "base": "f76012fb518703b1d98e243ac4f487f16877cfcb",
+  "restored_commit": "1435539475fdaa7810bc2bc780fba0514f765f48",
+  "restored_tree": "be55d8d934fb10617309a289e0d546ca1aed6ea0",
+  "bundle_sha256": "a87775fabeec73187f6da91d4944281232b74bc70aeeb5642d6043056cb000d0",
+  "bundle_verify": "OK",
+  "base_object_fsck": "OK on prior restore",
+  "final_commit_tree_oid_check": "OK",
+  "cloud_restore": "NOT_RUN"
+}

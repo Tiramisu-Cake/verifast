@@ -1,103 +1,113 @@
-# Checkpoint: подготовка роли verifast
+# Checkpoint: независимый review ManuallyDrop::new
 
-2026-10-09, обследование с 14:11 UTC. Разрешённый scope: только постоянные
-инструкции и документация. [AGENTS.md](../../AGENTS.md), [WORKFLOW.md](WORKFLOW.md).
-Это снимок первого запуска, а не текущее состояние работающих proof-агентов.
+2026-10-09. Начало первого tool-интервала14:37:10UTC (первое показание часов
+14:37:14UTC); основное окно до15:37:10UTC, предельное завершение до16:07:10UTC.
+Scope текущего поручения: две правки постоянных инструкций, независимый static
+review одного CFG-патча, локальный кандидат/tests, план Cloud и публикация пакета
+в `Tiramisu-Cake/verify-rust-std`, `review/verifast`. Сборки не разрешены.
+Сессия завершается после публикации; продление и новая фаза не требуются.
 
-## Checkout и доступ
+## Результат
 
-- VeriFast: `/root/verifast`, единственный зарегистрированный worktree;
-  при входе чистый, ветка `research/challenge-8`, HEAD
-  `f76012fb518703b1d98e243ac4f487f16877cfcb` (upstream base первого запуска).
-- Для документации создана локальная ветка `challenge8/verifast-maintainer`
-  от этого HEAD. Документационный commit определяется через
-  `git log -1 --format=%H -- docs/challenge8/STATUS.md`; SHA сообщается в отчёте.
-- Единственный remote VeriFast: `upstream`, fetch/push URL
-  `https://github.com/verifast/verifast.git`. Fork/origin не настроены.
-- Proof-проект: `/root/verify-rust-std`, общий Git dir
-  `/root/verify-rust-std/.git`; `origin` (fetch/push) —
-  `https://github.com/Tiramisu-Cake/verify-rust-std.git`.
-- Аккаунт владельца ограничен по сообщению владельца. Доступ к GitHub/Cloud
-  в этом запуске не проверялся; fetch/push/внешних сообщений не было.
-  Локальные SHA не объявляются опубликованными или доступными Cloud.
+Verdict **READY_FOR_CLOUD_VALIDATION**. Исходный патч исправляет лишний successor
+у точного identity lowering MDnew; сама проверка dead code остаётся включённой.
+Общий cleanup, достижимый от реального panicking call, сохраняется. Блокирующих
+дефектов исходного изменения на pinned source не найдено. Существующий checker
+нужно усилить привязкой unwind к actual caller и новым false-unwind контролем;
+refiner unwind TODO не объявляется закрытым.
 
-Найденные и проверенные read-only Git-командами proof-worktrees:
+Подробности: [карточка review](handoffs/manuallydrop-new-cfg.md),
+[evidence](reviews/manuallydrop-new-cfg-20261009/EVIDENCE.md),
+[Cloud-план](reviews/manuallydrop-new-cfg-20261009/CLOUD-VALIDATION.md),
+[черновик PR](reviews/manuallydrop-new-cfg-20261009/PR-DRAFT.md).
 
-| Путь | Ветка (либо detached) | HEAD при обследовании |
-| --- | --- | --- |
-| `/root/verify-rust-std` | `overnight/merge-26.10` | `d793eaa25f5cb4de92cda44ba9fc94ea1162d296` |
-| `/root/verify-rust-std-select-night` | `research/night-select-sort4-cloud-2026-10-09` | `0ecff7ee7e6fd5d88082915252cae5dd2395bf93` |
-| `/root/verify-rust-std-merge` | `challenge-8/merge` | `8444589f486e82f23c910bcc918cee1e4681b7ee` |
-| `/root/verify-rust-std-networks` | `challenge-8/networks` | `a9c8913317cbc6d17a8100a8237d50f2356cb5f3` |
-| `/dev/shm/c8-preserved-sort4-night-workflow` | detached | `4771dd9894b28312edf40e16d6398628beaf498f` |
-| `/dev/shm/c8-stock-2610` | `research/stock-26.10-baseline` | `80d9c0c318f71f49c3531883f7953883cb04c2f4` |
-| `/dev/shm/c8-sync-main` | `sync/upstream-cd371-main` | `af1ef9d0747b2f77febe2c3be7d7e6b65d9cdb27` |
-| `/dev/shm/c8-sync-merge` | `sync/upstream-cd371-merge` | `b0af5613e18699c877ef9b7a7ea27b00c7827dda` |
-| `/dev/shm/c8-sync-research` | `sync/upstream-cd371-research` | `a06cfb9d9dd95cf5a8875bd5d2f9bd85df47fadd` |
-| `/tmp/challenge8-workflow-default` | detached | `3d8c8c082a69dbb66c4ab566892e6be71d87a86d` |
-| `/tmp/sort4-constructor-workflow` | detached | `196121c11fee754327692a6aae7c97670d809c74` |
+## Checkout, версии и происхождение
 
-При входе в основном proof-tree изменён
-`research/challenge-8/cloud-build/next-merge-drop-caller/BUDGET.json`; в select-tree
-был untracked `next-select-frame-caller/FIRST-PREFLIGHT.json`, при чтении агент
-также наблюдал изменённый `BUDGET.json` этой фазы. Это активные чужие деревья;
-содержимое этих незакоммиченных изменений не читалось и не менялось.
-Остальные перечисленные деревья при проверке были чистыми. Новые clones/worktrees
-не создавались; чужие ветки/index/remotes/pins/ledgers не менялись.
+- Вход в `/root/verifast`: чистое дерево, `challenge8/verifast-maintainer`,
+  `d1d533d27fed74758b1462af29af7e17b2d960c9`. Исторический документационный scope
+  и полный STATUS сохраняются в этом commit и прежнем опубликованном пакете.
+- Отдельный организационный commit двух поправок:
+  `324d247cf6a8e0403b59fbe0a02b7bdd6a504417`. Повтор готового tool kit разрешается
+  после provenance/digest/regression checks и actual caller integration;
+  пересборка/общие регрессии — при конкретной причине. Permanent rules больше
+  не привязаны к первому documentation-only запуску.
+- Upstream remote: `https://github.com/verifast/verifast.git`; fetched master
+  `f76012fb518703b1d98e243ac4f487f16877cfcb`, совпал с базой кандидата.
+  Полная локальная история не shallow; замены по targeted history/API search нет.
+- Выбранный опубликованный proof/source snapshot:
+  `0ecff7ee7e6fd5d88082915252cae5dd2395bf93`, исходный путь
+  `research/challenge-8/verifast-manuallydrop-new-cfg-2610.patch`.
+  Blob7c4403b143d69b03b24e437fd4320776b51ca619, SHA256
+  `593d09405379974ffbc475c2e0b65d648d8a6913f55b765dd0c3bebdc0922781`.
+  Не менялся после введения e6c02f22…; совпадает с ориентиром70e5dfa3….
+- Неизменённый перенос, без адаптации/нового translator fix:
+  `227dc163117e85d89fb1877bfc1e239a0628e5ab`.
+- Candidate + финальные консолидированные tests:
+  `1435539475fdaa7810bc2bc780fba0514f765f48`,
+  `challenge8/manuallydrop-new-cfg-upstream-candidate`, root tree
+  `be55d8d934fb10617309a289e0d546ca1aed6ea0`.
+  Development history сохранена отдельно; финальный tree равен9209cc9d….
+- Собственный worktree `/root/verifast-manuallydrop-review`, ветка
+  `challenge8/manuallydrop-new-cfg-review`, development tip
+  `9209cc9dfdf9f70df5a2ee9b790dc7a66caf5cca`. Другие tool компоненты не перенесены.
+  Organizational commits не входят в candidate ancestry/upstream diff.
+- Подготовлен incremental Git bundle с prerequisite точной upstream-базы;
+  bundle/manifest, tool diff и tests diff включены в review artifacts.
+  Bundle verify и Git-only receive проверили original commit/tree identities;
+  Cloud restore/compiler execution NOT_RUN.
 
-## Прочитанные версии
+## Прочитанные источники
 
-Все proof-материалы читались через `git show <full-sha>:<path>` из двух точных
-деревьев выше: **M** = `d793eaa25f5cb4de92cda44ba9fc94ea1162d296`,
-**S** = `0ecff7ee7e6fd5d88082915252cae5dd2395bf93`.
-Пути ниже относительны корню proof-проекта; SHA в правой колонке — последнее
-изменение файла в соответствующем дереве, а M/S — версия целиком прочитанного дерева.
+Proof-материалы читались через `git show` exact snapshot S выше (или authorized
+API этого SHA), а evidence через неизменяемый artifact O1. Прочитаны S:
+`AGENTS.md`, `research/challenge-8/{WORK-POLICY.md,COMPLETION-PLAN.md}`,
+`cloud-build/next-select-frame-caller/PHASE.md`, `cloud-build/{README.md,PARALLEL-BUILDS.md}`,
+`OVERNIGHT-SELECT-SORT4-26.10.md`, candidate patch, stock/forget/CFG harnesses,
+фактические mem sources и относящиеся transport/runner/recipe исходники.
+Политика S — d389ff641194364e5eeda4ea4e66bedac4915a79; coordinator docs —
+55414a5c8168061ad960d1f36983334e13699a12. Снимки чужих фаз — context, не бюджет
+или разрешение этой роли. По VeriFast-base прочитаны upstream README.txt,
+src/README.txt, README.Linux.md, tests/rust/README.md, exporter README,
+translator/exporter/refiner/console и тестовый формат.
 
-| Прочитано | Дерево | Последнее изменение |
-| --- | --- | --- |
-| `AGENTS.md`, `research/challenge-8/WORK-POLICY.md`, `COMPLETION-PLAN.md` в той же директории | M | `1fcd91eff1507fe0bd0620a23b578edb454f1c3e` |
-| Та же тройка | S | `d389ff641194364e5eeda4ea4e66bedac4915a79` |
-| `research/challenge-8/merge/NEXT-MERGE-DROP-CALLER-CHECKPOINT-2026-10-09.md` | M | `d793eaa25f5cb4de92cda44ba9fc94ea1162d296` |
-| `research/challenge-8/merge/overnight/guard-ownership/insertion-onecell/SEMANTIC-CARD.md` | M | `d793eaa25f5cb4de92cda44ba9fc94ea1162d296` |
-| `research/challenge-8/merge/NEXT-MERGE-DROP-CALLER-CLOUD-2026-10-09.md` | M | `731fab682b0ffc262098c0fd5f3876427154311e` |
-| `research/challenge-8/cloud-build/next-select-frame-caller/PHASE.md` (нового END-CHECKPOINT в этом дереве ещё нет) | S | `0ecff7ee7e6fd5d88082915252cae5dd2395bf93` |
-| `research/challenge-8/cloud-build/afternoon-select-sort4/END-CHECKPOINT-2026-10-09.md` | S | `f398c06b99d706a2bf8fa80e56478fd3cf36b7ed` |
-| `research/challenge-8/cloud-build/night-select-sort4/END-CHECKPOINT-2026-10-09.md` | S | `20258b67c17d7e17ae25967488a98060969915a8` |
-| `research/challenge-8/cloud-build/README.md`, `PARALLEL-BUILDS.md` в той же директории | M | `c81fd1a517b9ad2b3ecf0b6d6ab3f50b841d5f8c` |
-| Те же coordinator docs | S | `55414a5c8168061ad960d1f36983334e13699a12` |
+Proof-worktrees при входе: main HEADf6c1318669f9a9b019dd67d46f345c43e39faa90,
+select HEAD0ecff7ee…; позднее remote merge продвинулся до8933d472….
+Активные агенты продолжали менять собственные files/ledgers; они сохранены,
+незакоммиченные изменения не читались как source или утверждённое evidence.
+Наша публикация использует только собственные service refs и Git plumbing,
+не меняя proof index, checkout, main, coordinator, ledgers или consumer pins.
 
-Дополнительно для понимания checkpoint прочитаны committed M
-`research/challenge-8/cloud-build/next-merge-drop-caller/{SESSION-STATE.json,BUDGET.json}`
-и S `research/challenge-8/cloud-build/next-select-frame-caller/BUDGET.json`.
-Различия policy/coordinator docs сопоставлены: обе версии требуют v2 two-slot
-admission, а S подробнее закрепляет постоянную Cloud-границу и pinned-object input.
-Исторические разрешения фаз не перенесены новой роли.
+## Проверки и NOT_RUN
 
-В VeriFast на `f76012fb518703b1d98e243ac4f487f16877cfcb` прочитаны
-`README.md`, `README.txt`, `README.Linux.md`, `src/README.txt`,
-`tests/rust/README.md`, `src/rust_frontend/vf_mir_exporter/README.md`.
-Существующих `AGENTS.md`/CONTRIBUTING-инструкций для самого VeriFast не найдено;
-upstream документы сохранены без изменений. Правила делегирования пользователя
-включены в новые инструкции.
+- Static review main + независимый CFG explorer; evidence explorer прочитал
+  существенные оригинальные логи, AST/MIR. Новый исходный патч не исправлялся.
+- Authorized GitHub API предоставил O1 run37698481357, job113055959913,
+  artifact11517185187. ZIP digest0cd026a6… сверён с API, 650 file hashes сохранены;
+  66 source/MIR comparisons stock/candidate совпали. Saved acceptance говорит
+  accepted=true только об историческом экспериментальном stock+CFG profile.
+- Непосредственно наблюдались stock forget dead-code отказ после normal/leak,
+  candidate forget exit0, сохранённый shared unwind через cleanup3,
+  intended ordinary false-unwind и contradictory-pre отказы. Это чтение evidence,
+  не лично воспроизведённые PASS и не новый replay-классификатор.
+- Static diff/границы/links, unchanged patch/transplant code hashes, Git bundle
+  verification/receive и artifact inventories проверены без proof execution.
+- Новые пять Rust fixtures, baseline/candidate build, VeriFast, rustc, upstream
+  suite, actual consumer integration, binary/tool delivery и принятие pin —
+  **NOT_RUN**. Cloud бюджет0, submissions0; роль не зарегистрирована.
+  Ни статусы чужих proofs, ни theorem coverage не менялись.
 
-## Результат и следующий запуск
+## Публикация и следующий шаг
 
-Инфраструктура роли `verifast` **ещё не подключена**: нет разрешённой Cloud-фазы,
-бюджета, собственного ledger/регистрации. Существующий coordinator не менялся.
-Очередь передачи, review и tool release ещё не начаты.
+Разрешён только канал review-пакетов: новый каталог
+`research/verifast-review/<полный-SHA-этого-checkpoint>/` поверх актуальной головы
+`review/verifast`. Предыдущая публикация15ab65bebe4d61bd197cb5feca4e26fb740eaf7c
+и пакетd1d533d… сохраняются. Полные instructions/status, review, исходный патч,
+tool diff/bundle/tests, PR draft, Cloud-план и provenance manifest входят в новый
+пакет. Фактический publication commit/remote/API hash receipt фиксируется после
+создания этого immutable checkpoint, во внешнем receipt и финальном отчёте.
+Никаких upstream push/issues/PR/fork, main merge или pin adoption не разрешено.
 
-Новых proof results нет. Build, proof execution, полноценные регрессии,
-повторная проверка старых результатов и review `ManuallyDrop::new` — **NOT_RUN**.
-Инвентаризация патчей и перенос кода/specs/tests не выполнялись. Выполнена только
-статическая проверка документации, ссылок и diff перед локальным commit.
-
-В M checkpoint/session-state описывают unresolved Build, тогда как committed
-ledger уже отмечает его terminal; семантическая карточка описывает сбой до proof
-execution. Это документальное расхождение не было reconciled с Cloud API и не
-даёт proof credit. Перед зависимым execution владелец должен сверить текущие
-evidence/ledger. Подготовке инструкций и отдельному локальному review оно не мешает.
-
-Рекомендуемое следующее задание: независимое review конкретного candidate
-`ManuallyDrop::new` по предоставленному точному SHA и воспроизводимому caller
-блокеру, с карточкой передачи и планом минимальных регрессий. Разрешение Cloud
-и бюджет для их исполнения оформляются отдельно; это предложение не начинает review.
+Одно следующее задание: отдельно разрешить реализацию и служебные проверки
+`verifast-mdnew-cfg` lane доставки incremental tool bundle с original Git
+identities. Dispatcher/роль/phase/budget подключаются только в новом поручении;
+до этого сборки не запускаются. Текущая сессия после публикации закрывается.
