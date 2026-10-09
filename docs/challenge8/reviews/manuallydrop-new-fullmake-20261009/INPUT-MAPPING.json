@@ -1,0 +1,39 @@
+{
+  "base": "0a83dba42db7ce0b445034ece5298afe980e57dc",
+  "head": "bf63b7dff2e053eea8541996d856fac4be11f6f1",
+  "tree": "687ae7dab447c94c4b87362d3d880d959c89e3de",
+  "bundle_sha256": "4e8a81f48b146ca281636d8ae5f3dc14d1e327662c7219eae3a80cc4afccbd00",
+  "manifest_sha256": "2bff45c22ae85f27d0bb1bc22041f8881dd0c7f2a7ea5e09f07b9aa3846e3f88",
+  "input_directory": "/root/verify-rust-std-verifast-infra/research/challenge-8/verifast-input/bf63b7dff2e053eea8541996d856fac4be11f6f1",
+  "branch": "upstream/manuallydrop-new-final-20261009",
+  "previous_head": "da4beb61a6c2dd0e80fe4a74c5c230f3adac7cab",
+  "previous_base": "f76012fb518703b1d98e243ac4f487f16877cfcb",
+  "verified_pin": "8f0b701e9f2a3da124372c5d37d4cda408d45001",
+  "implementation_changed": false,
+  "fixture_bytes_changed": false,
+  "base_changed": true,
+  "metadata_changed": true,
+  "registration_changed": true,
+  "commits": [
+    {
+      "sha": "9959fe7a20a7aa2214a72b50bcc8e1b452b1ccf4",
+      "author_name": "Tiramisu-Cake",
+      "author_email": "igkharin@gmail.com",
+      "author_date": "2026-10-09T23:24:02+03:00",
+      "committer_name": "Tiramisu-Cake",
+      "committer_email": "igkharin@gmail.com",
+      "committer_date": "2026-10-09T23:24:02+03:00",
+      "subject": "Rust: align ManuallyDrop::new successors with its identity CFG"
+    },
+    {
+      "sha": "bf63b7dff2e053eea8541996d856fac4be11f6f1",
+      "author_name": "Tiramisu-Cake",
+      "author_email": "igkharin@gmail.com",
+      "author_date": "2026-10-09T23:24:03+03:00",
+      "committer_name": "Tiramisu-Cake",
+      "committer_email": "igkharin@gmail.com",
+      "committer_date": "2026-10-09T23:29:33+03:00",
+      "subject": "Rust: register ManuallyDrop identity and unwind regressions"
+    }
+  ]
+}

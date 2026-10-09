@@ -1,0 +1,16 @@
+{
+  "commit": "e6c02f22420ba4ff6a77e39c9610708a6096e7d7",
+  "author_name": "root",
+  "author_email": "root@03ohba7t.vm",
+  "author_date": "2026-10-08T01:48:16+03:00",
+  "committer_name": "root",
+  "committer_email": "root@03ohba7t.vm",
+  "committer_date": "2026-10-08T01:48:16+03:00",
+  "subject": "[skip ci] Repair exact ManuallyDrop new successor inventory on 26.10",
+  "repository": "Tiramisu-Cake/verify-rust-std",
+  "original_patch_path": "research/challenge-8/verifast-manuallydrop-new-cfg-2610.patch",
+  "original_patch_sha256": "593d09405379974ffbc475c2e0b65d648d8a6913f55b765dd0c3bebdc0922781",
+  "unchanged_transplant": "227dc163117e85d89fb1877bfc1e239a0628e5ab",
+  "clean_implementation_commit": "8afd5e561d25aaa58ae1585588d65de7989ae431",
+  "human_identity_invented": false
+}

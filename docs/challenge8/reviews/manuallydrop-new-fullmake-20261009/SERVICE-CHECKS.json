@@ -1,0 +1,20 @@
+{
+  "infra_source_sha": "66ef5f0eac2c72f2366f4a1c8900291a0c20940d",
+  "phase_tests": "5/5 PASS",
+  "make_classifier_tests": "4/4 PASS",
+  "actual_final_registration": "443-byte block accepted; root testsuite738/739 invokes Rust",
+  "git_bundle_restore": "PASS exact base/head/tree/identities",
+  "affected_checker_prior_capture_replay": "PASS forget cleanup2/normal1; shared cleanup3/normal1; static replay only, no new execution",
+  "source_payload_bytes": 88986,
+  "source_payload_sha256": "165fe6b436433211535da70a9e2f4cf1212852acddb333515d99a4e14537dd90",
+  "source_transport_parts": "30/191",
+  "shell_syntax": "PASS",
+  "diff_check": "PASS",
+  "vps_scope": "Git/hash/static/classifier only, no compiler/verifier execution",
+  "fixed_findings": [
+    "MYSH whitespace actual echo separator",
+    "assignments directory absence is conditional skip",
+    "mandatory-check option restriction scoped to new registration block; existing upstream options preserved",
+    "native exact-output command explicitly captures child stderr and exit1"
+  ]
+}

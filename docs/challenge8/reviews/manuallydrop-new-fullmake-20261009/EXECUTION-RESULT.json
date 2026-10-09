@@ -1,0 +1,81 @@
+{
+  "archive_sha256": "d4cab012ac1bcfe90bdd217542035c2d38a892f946d02e09145f07e12d587090",
+  "audit": {
+    "accepted": true,
+    "affected_structural": {
+      "forget": {
+        "ast_sha256": "d65dd128b171f925201bacfaa9452a310bf612584bb032fd0aaadbbd4f23b953",
+        "cleanup_block": 2,
+        "mir_sha256": "1ab6511b93a8392175bdfc1e95caef02415968b640a64a87a0ad6077c23ebba7",
+        "normal_target": 1
+      },
+      "shared_cleanup": {
+        "ast_sha256": "dfd6100c5a62c7d1a57614185de0b70f592e69469abb32830db4c1c2d4b49730",
+        "cleanup_block": 3,
+        "mir_sha256": "3e4ff4885b5f8910e8030e5137b61eb4a787c68c08979f279ad60f4a677f762e",
+        "normal_target": 1
+      }
+    },
+    "base": "0a83dba42db7ce0b445034ece5298afe980e57dc",
+    "classification": "FULL_LINUX_MAKE_TEST_PASS",
+    "failed_stage": "make-test",
+    "head": "bf63b7dff2e053eea8541996d856fac4be11f6f1",
+    "make_test": {
+      "assignment_models": "SKIPPED_DIRECTORY_ABSENT",
+      "conditional_skip_lines": [
+        "SKIP: coqc not found in PATH, skipping line: vfrocq compile trivialest_reverse.v",
+        "SKIP: coqc not found in PATH, skipping line: del trivialest_reverse.v",
+        "SKIP: coqc not found in PATH, skipping line: del trivialest_reverse.vo",
+        "SKIP: coqc not found in PATH, skipping line: del trivialest_reverse.vos",
+        "SKIP: coqc not found in PATH, skipping line: del trivialest_reverse.vok",
+        "SKIP: coqc not found in PATH, skipping line: del trivialest_reverse.glob"
+      ],
+      "exit_status": 0,
+      "failed_process_lines": [
+        "0 failed processes"
+      ],
+      "java_frontend": "SKIPPED_ENV_NOT_SET",
+      "rocq": "NOT_RUN_COMPONENT_ABSENT",
+      "stderr_sha256": "cd0ed825db669919d2d8168ba651d06590df26c15cc71d7425a5392b3783c560",
+      "stdout_sha256": "01ea78e4ecde939d9d808919ba6afb30b3a9383455258d59161c8f633a0c6e71",
+      "z3_in_path": true
+    },
+    "provenance": {
+      "bundle_sha256": "4e8a81f48b146ca281636d8ae5f3dc14d1e327662c7219eae3a80cc4afccbd00",
+      "components": {
+        "refinement-checker": "d3727b32e78b3c3b8bfdc9ae930298a919fb9754e58ad64ccd52672c37d2781a",
+        "verifast": "7c4d61473e9eaab240c5ead5fd1233eaac68d0d82fc1386dc9a4ecc09980e2ee",
+        "vf-cxx-ast-exporter": "7960bc7474ea54a0d808ca35339fa048dcab18b0f542efc4f17385fb4b5750fd",
+        "vf-rust-mir-exporter": "471df1f619e4524637de8f9b538beb64074b7f0ac248fd0135a0889adaf3d2c4"
+      },
+      "infra_sha": "66ef5f0eac2c72f2366f4a1c8900291a0c20940d",
+      "manifest_sha256": "2bff45c22ae85f27d0bb1bc22041f8881dd0c7f2a7ea5e09f07b9aa3846e3f88",
+      "proof_sha": "66ef5f0eac2c72f2366f4a1c8900291a0c20940d",
+      "rustc_commit": "f7575a9da8e4a4fca3b5668d5a2ea7476db44b3f"
+    },
+    "runner_status": 0,
+    "schema": "verifast-mdnew-fullmake-audit-v1",
+    "selected_native": {
+      "dead_code_exit_status": 1,
+      "exact_dead_code_diagnostic": true,
+      "positive_and_expected_failure_commands": [
+        "verifast forget.rs",
+        "verifast shared_cleanup.rs",
+        "verifast -allow_should_fail false_normal_post.rs",
+        "verifast -allow_should_fail shared_false_unwind.rs"
+      ],
+      "registration_block_sha256": "60601a0d2b86c3d932fc889ee26ecda7d6f22af8880dcc7387041a55ec8f29b9"
+    },
+    "tree": "687ae7dab447c94c4b87362d3d880d959c89e3de"
+  },
+  "build_id": "e7724679-b9c0-4526-ac63-1e8020b4114f",
+  "cloud_status": "FAILURE",
+  "collector_issue": "legacy cases/* requirement and stale default tool_profile; original summary preserved",
+  "duration_seconds": 663.71,
+  "execution_credit": "original unchanged Cloud logs/source/component receipts; supplemental replay is service-only",
+  "execution_infra": "66ef5f0eac2c72f2366f4a1c8900291a0c20940d",
+  "failed_processes": 0,
+  "full_linux_make_test": "PASS",
+  "run_exit": 0,
+  "suite_seconds": 397.628032
+}

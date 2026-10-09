@@ -1,0 +1,28 @@
+{
+  "checkpoint": "edc99fb089e91bec2a5cce7fd27d6a66899f1d67",
+  "remote_head_verified": true,
+  "files": {
+    "research/challenge-8/cloud-build/package-evidence.py": {
+      "sha256": "25c9357c563b4d40fee92ef990aa1d44c6bea2654d1002177485ee0f72417144",
+      "git_blob": "ff1d51ded1036b35ce7afaca80b9a58b15e2639b",
+      "api_verified": true
+    },
+    "research/challenge-8/cloud-build/test-package-evidence-fullmake.py": {
+      "sha256": "72509de5dcc7a75f423422bf71f4d678b489b279cf9aa0d53fec0d48df427c51",
+      "git_blob": "0a206662d98ce96400360cbb2551bcb7645d54a1",
+      "api_verified": true
+    },
+    "research/challenge-8/cloud-build/verifast-mdnew-fullmake/BUDGET.json": {
+      "sha256": "294097509baa819f2fdc237c8df1f024c6527dd1028a35212ad29ae0d02d8ccf",
+      "git_blob": "7aaada470f5b007f5fef9573b23b9aab66589de1",
+      "api_verified": true
+    },
+    "research/challenge-8/cloud-build/verifast-mdnew-fullmake/RESULT.json": {
+      "sha256": "b36403594d4b9719cd79347b7efe707822b747432b9be0e2120d472755cdb806",
+      "git_blob": "7ea6f82c34feda328e6e7c83f9df9fbf5ec436c7",
+      "api_verified": true
+    }
+  },
+  "executed_cloud_source": "66ef5f0eac2c72f2366f4a1c8900291a0c20940d",
+  "collector_replay_source": "48dc1bd0db25119cefca91661011dfd5fdae630d"
+}

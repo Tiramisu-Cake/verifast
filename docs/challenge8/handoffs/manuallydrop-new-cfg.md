@@ -1,4 +1,25 @@
-# Current task — standalone upstream PR review preparation
+# Current handoff — final Linux test complete; separate user review
+
+Full Linux make test on current upstream0a83 passed (663.71s, exit0,
+zero failed processes) with source-built components. Final local-only owner/location:
+/root/verifast-mdnew-final, upstream/manuallydrop-new-final-20261009,
+head bf63b7dff2e053eea8541996d856fac4be11f6f1,
+tree687ae7dab447c94c4b87362d3d880d959c89e3de.
+Previous da4beb61 candidate stays intact. Translator/five fixture bytes unchanged;
+identity Tiramisu-Cake <igkharin@gmail.com>, new upstream base and stricter native
+negative diagnostic registration recorded in exact review mapping.
+Cloud e7724679 overall FAILURE is a collector location/profile mismatch after
+successful execution; original status/archive preserved, corrected collector replay
+is a separate service check. Own phase CLOSED,950/3600s, reservations0/max2.
+[Review](../reviews/manuallydrop-new-fullmake-20261009/REVIEW.md), [STATUS](../STATUS.md)
+and exact PR draft own current instructions. Next: independent/user review of
+exact head/title/body; await separate explicit approve before any upstream action.
+No proof-agent reacceptance of unchanged implementation required. Actual generic
+mem::forget proof remains a separate proof-agent task.
+
+Earlier checkpoints below remain historical.
+
+# Previous checkpoint — standalone upstream PR review preparation
 
 The original successor-inventory implementation was developed by the proof agent
 at e6c02f22420ba4ff6a77e39c9610708a6096e7d7 and used in an experimental profile

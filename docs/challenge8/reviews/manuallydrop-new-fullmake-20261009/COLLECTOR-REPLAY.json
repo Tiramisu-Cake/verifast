@@ -1,0 +1,87 @@
+{
+  "build_id": "e7724679-b9c0-4526-ac63-1e8020b4114f",
+  "created_utc": "2026-10-09T21:08:15Z",
+  "executed_infra_source_sha": "66ef5f0eac2c72f2366f4a1c8900291a0c20940d",
+  "interpretation": "Executed Linux make test and source-bound proof audit passed; Cloud Build status remains FAILURE because its originally executed collector rejected this recipe evidence shape. Supplemental replay supports review of the completed execution, not a new Cloud PASS.",
+  "original_cloud": {
+    "evidence_archive_sha256": "d4cab012ac1bcfe90bdd217542035c2d38a892f946d02e09145f07e12d587090",
+    "evidence_complete": false,
+    "manifest_sha256": "e59b480b6a88e59098fa93217288f0eda83aa1a4ac21b9b9d463998868094be0",
+    "missing_mandatory": [
+      "allprooflogs/cases/*"
+    ],
+    "reason": "Global collector required allprooflogs/cases/*, but this lane records complete named captures under allprooflogs/affected/{forget,shared_cleanup}/.",
+    "run_exit_code": 0,
+    "status": "FAILURE",
+    "summary_sha256": "4e2d6cbe3c59e5dc2a2e2cb04876896ae702248dd3c8a2d7f3cc7167588804d9",
+    "verification_accepted": false
+  },
+  "original_execution": {
+    "affected_structural": {
+      "forget": {
+        "ast_sha256": "d65dd128b171f925201bacfaa9452a310bf612584bb032fd0aaadbbd4f23b953",
+        "cleanup_block": 2,
+        "mir_sha256": "1ab6511b93a8392175bdfc1e95caef02415968b640a64a87a0ad6077c23ebba7",
+        "normal_target": 1
+      },
+      "shared_cleanup": {
+        "ast_sha256": "dfd6100c5a62c7d1a57614185de0b70f592e69469abb32830db4c1c2d4b49730",
+        "cleanup_block": 3,
+        "mir_sha256": "3e4ff4885b5f8910e8030e5137b61eb4a787c68c08979f279ad60f4a677f762e",
+        "normal_target": 1
+      }
+    },
+    "conditional_checks": {
+      "assignment_models": "SKIPPED_DIRECTORY_ABSENT",
+      "conditional_skip_lines": [
+        "SKIP: coqc not found in PATH, skipping line: vfrocq compile trivialest_reverse.v",
+        "SKIP: coqc not found in PATH, skipping line: del trivialest_reverse.v",
+        "SKIP: coqc not found in PATH, skipping line: del trivialest_reverse.vo",
+        "SKIP: coqc not found in PATH, skipping line: del trivialest_reverse.vos",
+        "SKIP: coqc not found in PATH, skipping line: del trivialest_reverse.vok",
+        "SKIP: coqc not found in PATH, skipping line: del trivialest_reverse.glob"
+      ],
+      "java_frontend": "SKIPPED_ENV_NOT_SET",
+      "rocq": "NOT_RUN_COMPONENT_ABSENT"
+    },
+    "failed_process_lines": [
+      "0 failed processes"
+    ],
+    "make_test_elapsed_seconds": 663.71,
+    "make_test_exit_status": 0,
+    "make_test_resources_sha256": "fec9c3946e642a9e07e126aacc3975b28242bdb78e96f6f565d1fddce5f91cd3",
+    "make_test_stderr_sha256": "cd0ed825db669919d2d8168ba651d06590df26c15cc71d7425a5392b3783c560",
+    "make_test_stdout_sha256": "01ea78e4ecde939d9d808919ba6afb30b3a9383455258d59161c8f633a0c6e71",
+    "proof_audit_accepted": true,
+    "proof_audit_classification": "FULL_LINUX_MAKE_TEST_PASS",
+    "proof_audit_sha256": "5879a7fab0eda17126cbc1356d4d1a98ce70d9868e09f54072b932bcd84e7b75"
+  },
+  "schema": "verifast-mdnew-fullmake-collector-replay-v1",
+  "scope": "Supplemental, VPS-only replay of evidence packaging and classification over the original downloaded Cloud archive. It did not compile, verify, submit, repeat or alter a Cloud Build. Original Cloud FAILURE and archive remain immutable.",
+  "supplemental_collector_source_sha": "48dc1bd0db25119cefca91661011dfd5fdae630d",
+  "supplemental_replay": {
+    "corrected_tool_profile": {
+      "candidate_source_sha": "bf63b7dff2e053eea8541996d856fac4be11f6f1",
+      "candidate_tree": "687ae7dab447c94c4b87362d3d880d959c89e3de",
+      "source_built_components": {
+        "refinement-checker": "d3727b32e78b3c3b8bfdc9ae930298a919fb9754e58ad64ccd52672c37d2781a",
+        "verifast": "7c4d61473e9eaab240c5ead5fd1233eaac68d0d82fc1386dc9a4ecc09980e2ee",
+        "vf-cxx-ast-exporter": "7960bc7474ea54a0d808ca35339fa048dcab18b0f542efc4f17385fb4b5750fd",
+        "vf-rust-mir-exporter": "471df1f619e4524637de8f9b538beb64074b7f0ac248fd0135a0889adaf3d2c4"
+      },
+      "upstream_base_sha": "0a83dba42db7ce0b445034ece5298afe980e57dc"
+    },
+    "evidence_complete": true,
+    "failure_class": "none",
+    "generated_local_archive_sha256": "fd04049fe9fe79ab9a62503a4f7c7aa636c69f68a747116318238aa73c8967cb",
+    "manifest_path": "COLLECTOR-REPLAY-MANIFEST.json",
+    "manifest_sha256": "602844e65038a7558bd01375236415346e2c8b95c0c6ec24ecd2ec281ab7e89f",
+    "missing_mandatory": [],
+    "not_uploaded_to_cloud": true,
+    "service_tests": "3/3 PASS; exact six affected captures accepted, missing capture rejected, historical cases/* rule preserved for other lanes",
+    "source_archive_sha256": "d4cab012ac1bcfe90bdd217542035c2d38a892f946d02e09145f07e12d587090",
+    "summary_path": "COLLECTOR-REPLAY-SUMMARY.json",
+    "summary_sha256": "81e23f17b9a83b9d07e2039aac831e06334e9a1408efe194e8fd0aa417f5aca1",
+    "verification_accepted": true
+  }
+}

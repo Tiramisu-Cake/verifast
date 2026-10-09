@@ -1,0 +1,50 @@
+{
+  "checkpoint_reference_scope": "Historical context from prior immutable packet; current actual proof obligation is standalone tool regression, no new proof-owner task.",
+  "explicit_precedence": "Current user60min window/new3600 budget/upstream publication forbidden overrides historical2h phase docs",
+  "files": {
+    "/root/verifast/AGENTS.md": {
+      "sha256": "149e7e0d9977cf8b66dc30c00bcdde4e44a0ddc4028b987aa6c019b4ecea9a74"
+    },
+    "/root/verifast/README.Linux.md": {
+      "sha256": "1b19435ec5a5c1ab089207fc868305da791ca35dff9f1a7d530af44763cf9a6c"
+    },
+    "/root/verifast/README.txt": {
+      "sha256": "9635973d50bf6ebf8756095639798559a99b85a5343bc73a7297c6db51b0c17d"
+    },
+    "/root/verifast/docs/challenge8/STATUS.md": {
+      "sha256": "7e7bcc9360171044fabea3310e137f168bd5b2c2ec2c62c4862fb24b533dfe59"
+    },
+    "/root/verifast/docs/challenge8/WORKFLOW.md": {
+      "sha256": "630c6b341832e222bff84b555703de7d618be2ac991fcd8ef13afd80d29a721a"
+    },
+    "/root/verifast/src/README.txt": {
+      "sha256": "c7d5cca3368b99f96bba4ef5a073c219de6cd72b4092eaa4f9faaf292b985b8d"
+    },
+    "/root/verify-rust-std-verifast-infra/AGENTS.md": {
+      "sha256": "a10ab98ab789e1370c9251023ec9cd552be051e0f887d392f7c0ee4d6cc1b829"
+    },
+    "/root/verify-rust-std-verifast-infra/research/challenge-8/COMPLETION-PLAN.md": {
+      "sha256": "11c51d7ea04263d1a83381b149eaafae4d428166ee74f60400d20a44f2934dcc"
+    },
+    "/root/verify-rust-std-verifast-infra/research/challenge-8/WORK-POLICY.md": {
+      "sha256": "f26b886446220d6aeb34ac014059126d2a8832a8359a88118200ce934f380184"
+    },
+    "/root/verify-rust-std-verifast-infra/research/challenge-8/cloud-build/PARALLEL-BUILDS.md": {
+      "sha256": "dbc2c8efafc307a154f1050ddad7903946c5c21b37507c555888dbadb59b0f3b"
+    },
+    "/root/verify-rust-std-verifast-infra/research/challenge-8/cloud-build/README.md": {
+      "sha256": "4a6b4971ac1df7943a02025aba4b0e0ce353d6e88e180ee36a2610fbc6a5b135"
+    }
+  },
+  "finish_deadline_utc": "2026-10-09T21:51:27Z",
+  "infra_instructions_commit": "da19a64ce9212b384c78bc040b4105eeeeeee714",
+  "main_deadline_utc": "2026-10-09T21:21:27Z",
+  "prior_package_proof_checkpoint_references": {
+    "merge": "334c837991ec3d034a375807219b8648dfcbb611:research/challenge-8/merge/NEXT-MERGE-DROP-CALLER-CHECKPOINT-2026-10-09.md",
+    "select-sort4": "da19a64ce9212b384c78bc040b4105eeeeeee714:research/challenge-8/STATUS.md"
+  },
+  "selected_upstream_base": "0a83dba42db7ce0b445034ece5298afe980e57dc",
+  "session_start_utc": "2026-10-09T20:21:27Z",
+  "updated_user_AGENTS": "2026-10-09 21:00 UTC: user replaced prior instructions; session phase, exact-head/body approve and existing authorized scope retained; read and accepted, no new phase opened.",
+  "verifast_checkpoint": "c8dfc5b64b3398ffa17899abb3f4daeed543e715"
+}

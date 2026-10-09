@@ -1,0 +1,203 @@
+{
+  "approval": "Separate independent review and explicit user approve must cover exact head and body/title",
+  "base": "0a83dba42db7ce0b445034ece5298afe980e57dc",
+  "base_changed": true,
+  "body_sha256": "e49180a8d4afab3e3e504f3f5ab21a5813e1eedcdba1bf4c08b1b65c66366986",
+  "branch": "upstream/manuallydrop-new-final-20261009",
+  "bundle_sha256": "4e8a81f48b146ca281636d8ae5f3dc14d1e327662c7219eae3a80cc4afccbd00",
+  "commits": [
+    {
+      "author_date": "2026-10-09T23:24:02+03:00",
+      "author_email": "igkharin@gmail.com",
+      "author_name": "Tiramisu-Cake",
+      "committer_date": "2026-10-09T23:24:02+03:00",
+      "committer_email": "igkharin@gmail.com",
+      "committer_name": "Tiramisu-Cake",
+      "sha": "9959fe7a20a7aa2214a72b50bcc8e1b452b1ccf4",
+      "subject": "Rust: align ManuallyDrop::new successors with its identity CFG"
+    },
+    {
+      "author_date": "2026-10-09T23:24:03+03:00",
+      "author_email": "igkharin@gmail.com",
+      "author_name": "Tiramisu-Cake",
+      "committer_date": "2026-10-09T23:29:33+03:00",
+      "committer_email": "igkharin@gmail.com",
+      "committer_name": "Tiramisu-Cake",
+      "sha": "bf63b7dff2e053eea8541996d856fac4be11f6f1",
+      "subject": "Rust: register ManuallyDrop identity and unwind regressions"
+    }
+  ],
+  "executed_infra_source": [
+    {
+      "accounted": true,
+      "archive_sha256": "d4cab012ac1bcfe90bdd217542035c2d38a892f946d02e09145f07e12d587090",
+      "build_id": "e7724679-b9c0-4526-ac63-1e8020b4114f",
+      "build_seconds": 950,
+      "create_time": "2026-10-09T20:44:59.120180867Z",
+      "dispatch_token": "dispatch-d569bd85be4745b7aa29f58bbae708b9",
+      "download_verified": true,
+      "execution_seconds": 949,
+      "finish_time": "2026-10-09T21:00:48.727118Z",
+      "infra_sha": "66ef5f0eac2c72f2366f4a1c8900291a0c20940d",
+      "lane": "verifast-mdnew-fullmake",
+      "owner": "verifast",
+      "phase_id": "VERIFAST-MDNEW-FULLMAKE-CLOUD-2026-10-09",
+      "proof_sha": "66ef5f0eac2c72f2366f4a1c8900291a0c20940d",
+      "publish_text_logs": true,
+      "reserved_seconds": 3060,
+      "source_input_sha256": "165fe6b436433211535da70a9e2f4cf1212852acddb333515d99a4e14537dd90",
+      "source_mode": "pinned-objects",
+      "start_time": "2026-10-09T20:44:59.930973976Z",
+      "status": "FAILURE",
+      "submitted_config_sha256": "a25cf04664c122014d3b869c25f6de29c9466c0636b82ac2c747c526d8d6ee52",
+      "timeout_seconds": 3000
+    }
+  ],
+  "files": {
+    "0001-Rust-align-ManuallyDrop-new-successors-with-its-iden.patch": {
+      "bytes": 3353,
+      "sha256": "c92fe5f225a7e9b10d488dc3f09ed7b82cbf965694588ad4a92f6df51d88826f"
+    },
+    "0002-Rust-register-ManuallyDrop-identity-and-unwind-regre.patch": {
+      "bytes": 7910,
+      "sha256": "8c83f2643aa2b2283a45c013e13e3ac9e7c0efce98b8582367bed0f96f71f7b0"
+    },
+    "CHECKS.md": {
+      "bytes": 4460,
+      "sha256": "4e32c5644e4a3972ee123a00da1740eb4fef9c5dd76e7485021cf453d6e15bcc"
+    },
+    "COLLECTOR-REPLAY-MANIFEST.json": {
+      "bytes": 64536,
+      "sha256": "602844e65038a7558bd01375236415346e2c8b95c0c6ec24ecd2ec281ab7e89f"
+    },
+    "COLLECTOR-REPLAY-SUMMARY.json": {
+      "bytes": 439,
+      "sha256": "81e23f17b9a83b9d07e2039aac831e06334e9a1408efe194e8fd0aa417f5aca1"
+    },
+    "COLLECTOR-REPLAY.json": {
+      "bytes": 4958,
+      "sha256": "0cba973317472777e7b458a1ae990d802120548bb1b3c02618f7dee397665aea"
+    },
+    "EXECUTION-RESULT.json": {
+      "bytes": 3828,
+      "sha256": "aa4957c06d0072398408520343c4c5355b14bb63d7d3cffbb456e8a783de92a9"
+    },
+    "INDEPENDENT-REVIEW.json": {
+      "bytes": 868,
+      "sha256": "e9277c99e66400f0647bacd9290aef8062f156fb971e5f901814fbb83cb3a585"
+    },
+    "INFRA-API-VERIFICATION.json": {
+      "bytes": 2784,
+      "sha256": "01b6c2fbe3c7b7e79bcc471c6d950e8a4bc6e9168617ba1f38066ce11361c396"
+    },
+    "INFRA-CHECKPOINT-API.json": {
+      "bytes": 1270,
+      "sha256": "9a5930f51c4fc2f81af0bde70cafebee51b7fcdfe1b217866fa2f1243b9d5765"
+    },
+    "INPUT-MAPPING.json": {
+      "bytes": 1742,
+      "sha256": "ea5b945f39d634883b7ee7744dc88ff4bcf7e9df496ee5441cffb040d89e654c"
+    },
+    "INSTRUCTION-READS.json": {
+      "bytes": 2817,
+      "sha256": "ea227d8d5febcfc977872512042224bcda3a668538991cfb72689b866b617e1e"
+    },
+    "NORMAL-CONDITIONALS.json": {
+      "bytes": 759,
+      "sha256": "985cfef7a839db2d1fa08ce7a22fa3db7426cdb6d3cec800ee7d2295915c39b2"
+    },
+    "ORIGINAL-ATTRIBUTION.json": {
+      "bytes": 788,
+      "sha256": "55ffedd594a0e3fd84c3c213c7b03b64d20601b26b60dd9f79a9fce7e92c1686"
+    },
+    "PR-BODY.md": {
+      "bytes": 1800,
+      "sha256": "e49180a8d4afab3e3e504f3f5ab21a5813e1eedcdba1bf4c08b1b65c66366986"
+    },
+    "PR-DRAFT.md": {
+      "bytes": 2400,
+      "sha256": "e051cf4f249428651abee6fd815329273ae8bed47cea8cd682896e5d54d9162b"
+    },
+    "PR-TITLE.txt": {
+      "bytes": 74,
+      "sha256": "dfa9b93e9368fdb751625483adfe217c476152f0fcd53694c3e42807f1c21b1c"
+    },
+    "PRIOR-EVIDENCE.json": {
+      "bytes": 5138,
+      "sha256": "5576d35752e83b2cc12253a08249290b7f5affb6d38c7454828e160b8921ea96"
+    },
+    "PUBLICATION-INSTRUCTIONS.md": {
+      "bytes": 1155,
+      "sha256": "f59c7dfbd3db055693631161a25819eb8b5bb612fb5552fdf92d9c4dbe1c7c84"
+    },
+    "REPRODUCE.md": {
+      "bytes": 913,
+      "sha256": "8ed14a68865ecb2db5668ed660316f2d7189b75fa2b47b34d998e2e709a5a219"
+    },
+    "REVIEW.md": {
+      "bytes": 3222,
+      "sha256": "44710a27c25513f98b06537576d6792816f59e6f39ae0680f7f36314105c8bf0"
+    },
+    "SERVICE-CHECKS.json": {
+      "bytes": 1049,
+      "sha256": "c185cdbf7b2ffc35494fe81630d22aa227d1b01215780d38a3bcf7ed72de16b4"
+    },
+    "SUCCESS-PATH-SERVICE.json": {
+      "bytes": 510,
+      "sha256": "befecf1c9e10e1336a1a8bece0ad85a7fa47b825ccf176b5a3e19eb62aa15c9c"
+    },
+    "TREE-EQUIVALENCE.json": {
+      "bytes": 2347,
+      "sha256": "2cf965a38b3c1e221f9c2711c54d364fb431b4b90eb5b70720bd81f07c3f342d"
+    },
+    "UPSTREAM-ADVANCE.json": {
+      "bytes": 26828,
+      "sha256": "5c818a56c5acf546e879f1d5ba724b67ec65ef31c3ad221e26a7812cdfc67fe0"
+    },
+    "UPSTREAM-END-REF.json": {
+      "bytes": 384,
+      "sha256": "2f612d9cb7c04897bd1a615039850a8213bc9937268331147f655d01020ae758"
+    },
+    "UPSTREAM-REF.json": {
+      "bytes": 345,
+      "sha256": "03c214af12c18f8748a31fc5f5b6979a94fa612f879d92a63dc9d693140c2b41"
+    },
+    "pr.diff": {
+      "bytes": 9291,
+      "sha256": "01c609ba40e01db3ccc5fa28be61029bacecdda713ab014adce2fe83d2c77c3a"
+    },
+    "ready.bundle": {
+      "bytes": 3979,
+      "sha256": "4e8a81f48b146ca281636d8ae5f3dc14d1e327662c7219eae3a80cc4afccbd00"
+    },
+    "reproducer.rs": {
+      "bytes": 183,
+      "sha256": "2a6f0d16bd29cc9ea6c10e3b63e6b94000249d72e94d64f99d45cefb277ce1f7"
+    }
+  },
+  "fixture_bytes_changed": false,
+  "full_linux_make_test": {
+    "build_id": "e7724679-b9c0-4526-ac63-1e8020b4114f",
+    "cloud_failure_reason": "outer collector expected cases/*; actual full suite and CFG checks passed",
+    "cloud_status": "FAILURE",
+    "duration": "663.71s (11m03.71s), including build prerequisites",
+    "result": "PASS",
+    "supplemental_collector_source": "48dc1bd0db25119cefca91661011dfd5fdae630d"
+  },
+  "head": "bf63b7dff2e053eea8541996d856fac4be11f6f1",
+  "implementation_changed": false,
+  "infrastructure_checkpoint": "edc99fb089e91bec2a5cce7fd27d6a66899f1d67",
+  "input_directory": "/root/verify-rust-std-verifast-infra/research/challenge-8/verifast-input/bf63b7dff2e053eea8541996d856fac4be11f6f1",
+  "manifest_sha256": "2bff45c22ae85f27d0bb1bc22041f8881dd0c7f2a7ea5e09f07b9aa3846e3f88",
+  "metadata_changed": true,
+  "native_registration_changed": true,
+  "previous_base": "f76012fb518703b1d98e243ac4f487f16877cfcb",
+  "previous_head": "da4beb61a6c2dd0e80fe4a74c5c230f3adac7cab",
+  "registration_changed": true,
+  "schema": "verifast-mdnew-final-pr-review-v1",
+  "title": "[Rust] Keep ManuallyDrop::new identity successors consistent with the CFG",
+  "tree": "687ae7dab447c94c4b87362d3d880d959c89e3de",
+  "upstream_publication": "NOT_PUBLISHED",
+  "verdict": "READY_FOR_USER_REVIEW",
+  "verified_pin": "8f0b701e9f2a3da124372c5d37d4cda408d45001"
+}

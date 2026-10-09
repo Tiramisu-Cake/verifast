@@ -1,0 +1,14 @@
+{
+  "build_id": "e7724679-b9c0-4526-ac63-1e8020b4114f",
+  "diagnostic_complete": false,
+  "evidence_complete": true,
+  "failure_class": "none",
+  "lane": "verifast-mdnew-fullmake",
+  "missing_mandatory": [],
+  "run_exit_code": 0,
+  "schema_version": 1,
+  "smoke_success": false,
+  "text_logs_complete": true,
+  "text_logs_index_sha256": "02e068cb599f22aa9ffd766851709262264abed5af5500bf951c21c1c1de5009",
+  "verification_accepted": true
+}

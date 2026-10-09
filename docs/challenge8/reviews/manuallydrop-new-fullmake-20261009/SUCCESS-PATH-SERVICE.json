@@ -1,0 +1,10 @@
+{
+  "scope": "isolated classifier service test; SYNTHETIC receipts/compiler/component bytes; CFG helper stubbed and separately replayed on saved captures; Git selected inputs real bf63. No compiler/verifier run, no proof credit.",
+  "infra_source_sha": "66ef5f0eac2c72f2366f4a1c8900291a0c20940d",
+  "accepted_path": "PASS",
+  "timeout_classification": "INCOMPLETE_TIMEOUT",
+  "failed_make_classification": "TEST_FAILURE",
+  "unrelated_negative_rejected": "WRONG_DIAGNOSTIC",
+  "cases": 4,
+  "result": "PASS"
+}

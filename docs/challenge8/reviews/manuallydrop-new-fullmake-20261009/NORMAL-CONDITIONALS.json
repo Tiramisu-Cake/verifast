@@ -1,0 +1,14 @@
+{
+  "source_base": "0a83dba42db7ce0b445034ece5298afe980e57dc",
+  "assignment_models": "conditional on ../assignments existence; absent in chosen tree",
+  "java_frontend": "conditional on VERIFAST_JAVA_AST_SERVER",
+  "rocq": "mysh ifrocq probes which coqc; absence emits SKIP",
+  "z3_legacy": "Vfconfig generator sets z3_present=false; ifz3 lines conditionally skipped",
+  "z3v45": "Vfconfig generator sets z3v4dot5_present=true; ifz3v4.5 lines enabled",
+  "source_locations": [
+    "src/GNUmakefile:584-620",
+    "src/mysh/mysh.ml:377-390",
+    "src/vfconfig/generator/vfconfig_generator.ml:12-13"
+  ],
+  "runtime_note": "which z3 receipt is PATH inventory, not the mysh solver-feature gate. Actual skipped lines/completion will be bound to Cloud capture."
+}
