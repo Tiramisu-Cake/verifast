@@ -1,3 +1,12 @@
+# Current handoff — focused validation completed
+
+**FOCUSED_VALIDATION_PASS**, tool/tests8f0b701e9f2a3da124372c5d37d4cda408d45001;
+translator unchanged. [Current result](../cloud/verifast-mdnew-validation-20261009.md)
+records complete Cloud gates, five upstream regressions, accounting and remaining
+consumer/upstream NOT_ACCEPTED. [STATUS](../STATUS.md) owns current instructions.
+The following review and first delivery phase are preserved historical records;
+their NOT_RUN and next assignments describe those earlier checkpoints.
+
 # MDNEW-CFG-2610: independent review
 
 Verdict: **READY_FOR_CLOUD_VALIDATION**. Static review finds no blocking defect
@@ -22,7 +31,8 @@ new proof result. New builds and tests are **NOT_RUN**.
 - Unchanged transplant: `227dc163117e85d89fb1877bfc1e239a0628e5ab`, local branch
   `challenge8/manuallydrop-new-cfg-review`, worktree `/root/verifast-manuallydrop-review`.
   No adaptation or new implementation fix to the original patch was made.
-- This worktree is the sole owner of the **review variant and its new tests**.
+- This was the historical review worktree; the current sole active review/test
+  owner is /root/verifast-mdnew-validation (challenge8/mdnew-focused-validation).
   No ownership transfer of the proof agent's experimental profile was confirmed;
   the original owner remains active there. No consumer pins or proof files changed.
   Final consolidated tests/tool tip: `1435539475fdaa7810bc2bc780fba0514f765f48`,

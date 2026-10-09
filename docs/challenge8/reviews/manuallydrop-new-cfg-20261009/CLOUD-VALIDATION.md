@@ -1,6 +1,10 @@
-# Cloud validation plan — prepared, NOT_RUN
+# Historical Cloud validation plan
 
-This is a recipe specification, not permission to submit. No Cloud Build,
+Current execution and exact updated pins are recorded in
+[focused validation checkpoint](../../cloud/verifast-mdnew-validation-20261009.md).
+The plan below preserves its original preparation scope and authorization status.
+
+This was a recipe specification, not permission to submit. No Cloud Build,
 role registration, dispatcher change, ledger or consumer pin was made. Before
 execution the owner must authorize a phase, its own budget/deadline/ledger for
 `verifast`, reviewed lane and pinned infrastructure revision. Preserve the existing

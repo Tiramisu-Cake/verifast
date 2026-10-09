@@ -36,7 +36,7 @@ proof-агентам в `verify-rust-std`. Их деревья читать че
 parsing и только малые изолированные tests служебных классификаторов по
 WORK-POLICY. Компиляция VeriFast/Rust, proof execution и полноценные регрессии —
 только в Cloud; тяжёлые build dependencies на VPS не устанавливать.
-Будущему owner `verifast` нужны отдельные разрешённые фаза, бюджет, ledger и
+Для каждой новой сессии owner `verifast` нужны отдельные разрешённые фаза, бюджет, ledger и
 подключение к существующему coordinator: максимум два queued/running/unresolved
 Build суммарно и один на owner/ledger. Исторические бюджеты не наследуются.
 

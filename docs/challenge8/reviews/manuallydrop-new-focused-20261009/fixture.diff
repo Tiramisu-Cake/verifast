@@ -1,0 +1,63 @@
+diff --git a/tests/rust/purely_unsafe/manuallydrop_new_cfg/README.md b/tests/rust/purely_unsafe/manuallydrop_new_cfg/README.md
+index 5a943905..f920c6c1 100644
+--- a/tests/rust/purely_unsafe/manuallydrop_new_cfg/README.md
++++ b/tests/rust/purely_unsafe/manuallydrop_new_cfg/README.md
+@@ -30,3 +30,22 @@ Expected result: exit status 1 with a dead-code diagnostic spanning the whole
+ function. This is not a `req false` proof error. `mysh` does not express this
+ expected exit status, so the fixture remains unregistered. Do not add
+ `-allow_dead_code` or an assumption to make this case pass.
++
++## Expected-failure traversal
++
++`shared_false_unwind.rs` has a normal-first conditional after consuming `t`.
++The true branch reaches the common closing-brace return; the false branch calls
++`new(true)`, which really panics. VeriFast visits the translated true branch first.
++This records the shared normal return before the expected false unwind post aborts
++that function's verification. The previous unconditional fixture aborted before
++visiting this return and the separate mandatory dead-code pass then rejected the
++closing brace. No dead-code exemption or weaker unwind postcondition is used.
++`normal_first_cleanup` in the positive file has the same conditional and truthful
++thread-token posts. Cloud must confirm both real outcomes and the negative's
++exact post failure; an unused should_fail marker still rejects a missing unwind.
++
++The conditional is a tail expression: the `new(true)` arm has no semicolon.
++Its call result flows directly to the common return instead of adding an
++else-only goto after the call. Such a goto would remain unvisited when the
++expected unwind error ends this verification scope. The positive mirror has
++exactly the same tail-expression shape; Cloud must inspect the actual MIR/AST.
+diff --git a/tests/rust/purely_unsafe/manuallydrop_new_cfg/shared_cleanup.rs b/tests/rust/purely_unsafe/manuallydrop_new_cfg/shared_cleanup.rs
+index b150b3f6..45c97e15 100644
+--- a/tests/rust/purely_unsafe/manuallydrop_new_cfg/shared_cleanup.rs
++++ b/tests/rust/purely_unsafe/manuallydrop_new_cfg/shared_cleanup.rs
+@@ -24,3 +24,16 @@ pub unsafe fn shared_cleanup<T>(t: T, b: bool)
+     let _ = std::mem::ManuallyDrop::new(t);
+     new(b);
+ }
++
++// Positive control with the same normal-first shape as the false-unwind test.
++pub unsafe fn normal_first_cleanup<T>(t: T, b: bool)
++//@ req thread_token(?tid) &*& tid == currentThread;
++//@ ens thread_token(tid);
++//@ on_unwind_ens thread_token(tid);
++{
++    let _ = std::mem::ManuallyDrop::new(t);
++    if b {
++    } else {
++        new(true)
++    }
++}
+diff --git a/tests/rust/purely_unsafe/manuallydrop_new_cfg/shared_false_unwind.rs b/tests/rust/purely_unsafe/manuallydrop_new_cfg/shared_false_unwind.rs
+index 330439af..221c061f 100644
+--- a/tests/rust/purely_unsafe/manuallydrop_new_cfg/shared_false_unwind.rs
++++ b/tests/rust/purely_unsafe/manuallydrop_new_cfg/shared_false_unwind.rs
+@@ -14,5 +14,9 @@ pub unsafe fn shared_cleanup_false_unwind_post<T>(t: T, b: bool)
+ //@ on_unwind_ens false; //~should_fail
+ {
+     let _ = std::mem::ManuallyDrop::new(t);
+-    new(b);
++    // Visit the shared normal return before the expected unwind failure.
++    if b {
++    } else {
++        new(true)
++    }
+ }

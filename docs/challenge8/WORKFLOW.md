@@ -143,7 +143,7 @@ bootstrap/x.py, proof runners/extractors и полноценные tool-regressi
 в Cloud, включая wrappers/containers. Не ставить тяжёлые build dependencies
 на VPS. GitHub Actions также требуют отдельного явного разрешения.
 
-Будущий стабильный owner — `verifast`. До первого Build нужны отдельное
+Стабильный owner — `verifast`. Перед новой фазой и первым Build нужны отдельное
 разрешение на фазу, её собственный бюджет и ledger, проверенная lane и подключение
 к **существующему** coordinator. Исторические бюджеты, deadlines и разрешения
 `merge`/`select-sort4` не переходят этой роли. Точные infra/proof SHAs обязательны.
@@ -159,7 +159,7 @@ bootstrap/x.py, proof runners/extractors и полноценные tool-regressi
 (select-sort4, merge, verifast) и три слота только после подтверждения всех
 клиентов и миграции под общим lock; старый клиент обязан отказать на новом
 протоколе. Активные записи не удалять и не обнулять. Точный переносимый commit
-и порядок принятия сохранены в [Cloud checkpoint](cloud/verifast-mdnew-20261009.md).
+и порядок принятия сохранены в [Cloud checkpoint](cloud/verifast-mdnew-validation-20261009.md).
 Request носит advisory-характер; admission и token reservation обязательны.
 Неопределённый submit занимает слот до terminal API evidence или окончательного
 подтверждения отказа; timeout клиента не разрешает повторный submit/снятие слота.
