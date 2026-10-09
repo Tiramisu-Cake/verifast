@@ -152,10 +152,14 @@ bootstrap/x.py, proof runners/extractors и полноценные tool-regressi
 идентичностей; не передавать GitHub credentials, рабочее дерево, config или hooks
 как build input. Доступность такого входа проверять отдельно от наличия GitHub-форка.
 
-Протокол v2 описан в proof-repo: `research/challenge-8/cloud-build/README.md`
+Действующий протокол описан в proof-repo: `research/challenge-8/cloud-build/README.md`
 и `PARALLEL-BUILDS.md`; клиенты — `control.py`/`coordination.py`. Shared state:
-`/root/smallsort-ci-coordination/active.json`, lock: соседний `lock`. Максимум
-два queued/running/unresolved Cloud Build суммарно, один на owner и ledger.
+`/root/smallsort-ci-coordination/active.json`, lock: соседний `lock`. При активном v2 максимум два queued/running/unresolved Cloud Build суммарно,
+один на owner и ledger. Подготовленный v3 допускает три стабильных owners
+(select-sort4, merge, verifast) и три слота только после подтверждения всех
+клиентов и миграции под общим lock; старый клиент обязан отказать на новом
+протоколе. Активные записи не удалять и не обнулять. Точный переносимый commit
+и порядок принятия сохранены в [Cloud checkpoint](cloud/verifast-mdnew-20261009.md).
 Request носит advisory-характер; admission и token reservation обязательны.
 Неопределённый submit занимает слот до terminal API evidence или окончательного
 подтверждения отказа; timeout клиента не разрешает повторный submit/снятие слота.

@@ -1,113 +1,89 @@
-# Checkpoint: независимый review ManuallyDrop::new
+# Checkpoint: VeriFast Cloud / pinned ManuallyDrop::new
 
-2026-10-09. Начало первого tool-интервала14:37:10UTC (первое показание часов
-14:37:14UTC); основное окно до15:37:10UTC, предельное завершение до16:07:10UTC.
-Scope текущего поручения: две правки постоянных инструкций, независимый static
-review одного CFG-патча, локальный кандидат/tests, план Cloud и публикация пакета
-в `Tiramisu-Cake/verify-rust-std`, `review/verifast`. Сборки не разрешены.
-Сессия завершается после публикации; продление и новая фаза не требуются.
+2026-10-09. Session15:27:32UTC; main deadline16:27:32UTC; absolute16:57:32UTC.
+Direct user assignment authorizes infrastructure, own3600-second Cloud account
+and own infra/review publication. After main only the previously submitted
+focused step, evidence, accounting and checkpoint were completed.
 
-## Результат
+Verdict **FOCUSED_BASELINE_CANDIDATE_NOT_ACCEPTED**. Stable owner `verifast` is connected to the existing
+Cloud Build coordinator with its own phase, ledger and state. Live protocol
+remains **v2/max2**. Portable v3/max3 is prepared and isolated-tested; peer client
+acknowledgments and live migration are **NOT_RUN**, so three simultaneous Builds
+are not claimed. Exact peer instructions: infrastructure verifast-mdnew/ADOPTION.md.
 
-Verdict **READY_FOR_CLOUD_VALIDATION**. Исходный патч исправляет лишний successor
-у точного identity lowering MDnew; сама проверка dead code остаётся включённой.
-Общий cleanup, достижимый от реального panicking call, сохраняется. Блокирующих
-дефектов исходного изменения на pinned source не найдено. Существующий checker
-нужно усилить привязкой unwind к actual caller и новым false-unwind контролем;
-refiner unwind TODO не объявляется закрытым.
+Detailed delivery, profile, read versions, quota/access limits, corrections and
+evidence bindings: [session record](cloud/verifast-mdnew-20261009.md).
+Original independent review checkpoint0542ed1adfcb6ae2a7ae7b90baa8a332d67076fe
+and publication71522fbb12b20474d91c37221c48bcb0380e7ea8 are retained.
 
-Подробности: [карточка review](handoffs/manuallydrop-new-cfg.md),
-[evidence](reviews/manuallydrop-new-cfg-20261009/EVIDENCE.md),
-[Cloud-план](reviews/manuallydrop-new-cfg-20261009/CLOUD-VALIDATION.md),
-[черновик PR](reviews/manuallydrop-new-cfg-20261009/PR-DRAFT.md).
+## Exact versions
 
-## Checkout, версии и происхождение
+- Published infrastructure base4058e8bf45eb567e4656d953274c96bf8488a7a3.
+- Portable four-file protocol commit487dc39ccea94e29f203b7a57baf87d71d539038;
+  proof owners cherry-pick only this commit, preserving their phase-specific control.py.
+- Delivery registration6c51e8c1c9ec6a1be45a0c974accffd42cb6ca92; runner order fix
+  00401111e8c7f911cbad7550351d7a2a0c608ee6; Git mode fix
+  963338734c0a0d4d152aa7d3432d51fd1901e081; preflight authorization recheck /
+  final executed infra=proof390aecedc9ac975df6bace0a9bb0bc6b145dc5f6.
+  All exact code commits are published and authorized GitHub API-verified.
+- Upstream basef76012fb518703b1d98e243ac4f487f16877cfcb, unchanged translator
+  transplant227dc163117e85d89fb1877bfc1e239a0628e5ab, candidate with tests
+  1435539475fdaa7810bc2bc780fba0514f765f48; tree
+  be55d8d934fb10617309a289e0d546ca1aed6ea0. No new translator/fixture semantics.
+- Candidate bundle SHA256a87775fabeec73187f6da91d4944281232b74bc70aeeb5642d6043056cb000d0.
+  Source bundle and runtime binary components have separate provenance inventories.
 
-- Вход в `/root/verifast`: чистое дерево, `challenge8/verifast-maintainer`,
-  `d1d533d27fed74758b1462af29af7e17b2d960c9`. Исторический документационный scope
-  и полный STATUS сохраняются в этом commit и прежнем опубликованном пакете.
-- Отдельный организационный commit двух поправок:
-  `324d247cf6a8e0403b59fbe0a02b7bdd6a504417`. Повтор готового tool kit разрешается
-  после provenance/digest/regression checks и actual caller integration;
-  пересборка/общие регрессии — при конкретной причине. Permanent rules больше
-  не привязаны к первому documentation-only запуску.
-- Upstream remote: `https://github.com/verifast/verifast.git`; fetched master
-  `f76012fb518703b1d98e243ac4f487f16877cfcb`, совпал с базой кандидата.
-  Полная локальная история не shallow; замены по targeted history/API search нет.
-- Выбранный опубликованный proof/source snapshot:
-  `0ecff7ee7e6fd5d88082915252cae5dd2395bf93`, исходный путь
-  `research/challenge-8/verifast-manuallydrop-new-cfg-2610.patch`.
-  Blob7c4403b143d69b03b24e437fd4320776b51ca619, SHA256
-  `593d09405379974ffbc475c2e0b65d648d8a6913f55b765dd0c3bebdc0922781`.
-  Не менялся после введения e6c02f22…; совпадает с ориентиром70e5dfa3….
-- Неизменённый перенос, без адаптации/нового translator fix:
-  `227dc163117e85d89fb1877bfc1e239a0628e5ab`.
-- Candidate + финальные консолидированные tests:
-  `1435539475fdaa7810bc2bc780fba0514f765f48`,
-  `challenge8/manuallydrop-new-cfg-upstream-candidate`, root tree
-  `be55d8d934fb10617309a289e0d546ca1aed6ea0`.
-  Development history сохранена отдельно; финальный tree равен9209cc9d….
-- Собственный worktree `/root/verifast-manuallydrop-review`, ветка
-  `challenge8/manuallydrop-new-cfg-review`, development tip
-  `9209cc9dfdf9f70df5a2ee9b790dc7a66caf5cca`. Другие tool компоненты не перенесены.
-  Organizational commits не входят в candidate ancestry/upstream diff.
-- Подготовлен incremental Git bundle с prerequisite точной upstream-базы;
-  bundle/manifest, tool diff и tests diff включены в review artifacts.
-  Bundle verify и Git-only receive проверили original commit/tree identities;
-  Cloud restore/compiler execution NOT_RUN.
+## Validation and execution
 
-## Прочитанные источники
+Cloud direct outputs: baseline forget dead code; candidate forget/shared_cleanup
+exit0; candidate false-normal line3, false-unwind line14 and dead-precondition
+reject as expected. Full structural unwind gate remains incomplete because capture
+log publication failed. False-unwind allow_should_fail also reaches unmarked
+closing-brace dead code. Detailed observed-only data are in CLOUD-OBSERVATIONS.json.
+Capture-log correctioncbfe28393e1e61aacf0957466ee91e9243b25d2f is published/API-verified,
+locally fake-stage-tested on both sides; Cloud at this correction **NOT_RUN**.
 
-Proof-материалы читались через `git show` exact snapshot S выше (или authorized
-API этого SHA), а evidence через неизменяемый artifact O1. Прочитаны S:
-`AGENTS.md`, `research/challenge-8/{WORK-POLICY.md,COMPLETION-PLAN.md}`,
-`cloud-build/next-select-frame-caller/PHASE.md`, `cloud-build/{README.md,PARALLEL-BUILDS.md}`,
-`OVERNIGHT-SELECT-SORT4-26.10.md`, candidate patch, stock/forget/CFG harnesses,
-фактические mem sources и относящиеся transport/runner/recipe исходники.
-Политика S — d389ff641194364e5eeda4ea4e66bedac4915a79; coordinator docs —
-55414a5c8168061ad960d1f36983334e13699a12. Снимки чужих фаз — context, не бюджет
-или разрешение этой роли. По VeriFast-base прочитаны upstream README.txt,
-src/README.txt, README.Linux.md, tests/rust/README.md, exporter README,
-translator/exporter/refiner/console и тестовый формат.
+Local isolated service checks passed: coordinator4, phase3 (rechecked after
+authorization fix), Git-only delivery8, classifier7, Git mode3. Transport checks
+cover exact committed blobs, original commit/tree recovery, archive/config input
+binding, payload and argument bounds, oversize and wrong identity rejection.
+Shell/Python/embedded Python syntax, recipe and diff checks passed. Saved O1 is
+parser development context only; no historical execution credit. No compilation,
+MIR extraction, verifier or full regressions ran on VPS.
 
-Proof-worktrees при входе: main HEADf6c1318669f9a9b019dd67d46f345c43e39faa90,
-select HEAD0ecff7ee…; позднее remote merge продвинулся до8933d472….
-Активные агенты продолжали менять собственные files/ledgers; они сохранены,
-незакоммиченные изменения не читались как source или утверждённое evidence.
-Наша публикация использует только собственные service refs и Git plumbing,
-не меняя proof index, checkout, main, coordinator, ledgers или consumer pins.
+| Build ID | Status | Conservative seconds | Infra=proof SHA |
+| --- | --- | ---: | --- |
+| 9082cb24-4616-4d2d-b8e7-ab6bdb790cba | FAILURE | 76 | 6c51e8c1c9ec6a1be45a0c974accffd42cb6ca92 |
+| 0b91057a-72d5-480b-973b-61f38c97d749 | FAILURE | 354 | 00401111e8c7f911cbad7550351d7a2a0c608ee6 |
+| 91e5ba26-9a4e-44e0-8bf3-92dc1e4455bd | FAILURE | 356 | 390aecedc9ac975df6bace0a9bb0bc6b145dc5f6 |
 
-## Проверки и NOT_RUN
+Total **786/3600 seconds**; remaining
+2814. All own submissions are terminal and accounted;
+active own reservation and unresolved own submissions are absent. Phase is closed.
+Integrity-verified evidence: gs://smallsort-ci-evidence-504462351565/cloud-build/BUILD-ID/.
+Full manifests/configs/archive hashes and classifier output are in the immutable packet.
+First attempt failed before tool restore; second restored exact tools and compiled
+both consoles but failed at component symlink audit before fixtures. Neither gives
+focused proof credit. Last attempt's exact audit is preserved without overriding
+missing data or earlier failures.
 
-- Static review main + независимый CFG explorer; evidence explorer прочитал
-  существенные оригинальные логи, AST/MIR. Новый исходный патч не исправлялся.
-- Authorized GitHub API предоставил O1 run37698481357, job113055959913,
-  artifact11517185187. ZIP digest0cd026a6… сверён с API, 650 file hashes сохранены;
-  66 source/MIR comparisons stock/candidate совпали. Saved acceptance говорит
-  accepted=true только об историческом экспериментальном stock+CFG profile.
-- Непосредственно наблюдались stock forget dead-code отказ после normal/leak,
-  candidate forget exit0, сохранённый shared unwind через cleanup3,
-  intended ordinary false-unwind и contradictory-pre отказы. Это чтение evidence,
-  не лично воспроизведённые PASS и не новый replay-классификатор.
-- Static diff/границы/links, unchanged patch/transplant code hashes, Git bundle
-  verification/receive и artifact inventories проверены без proof execution.
-- Новые пять Rust fixtures, baseline/candidate build, VeriFast, rustc, upstream
-  suite, actual consumer integration, binary/tool delivery и принятие pin —
-  **NOT_RUN**. Cloud бюджет0, submissions0; роль не зарегистрирована.
-  Ни статусы чужих proofs, ни theorem coverage не менялись.
+Full upstream suite **NOT_RUN**; consumer integration/pin adoption **NOT_RUN /
+NOT_ACCEPTED**; upstream acceptance **NOT_ACCEPTED**. Delivery, focused gates,
+consumer pin and upstream acceptance are separate outcomes. Refiner unwind TODO
+is not closed by exit0 or identical exported MIR.
 
-## Публикация и следующий шаг
+## Publication and continuation
 
-Разрешён только канал review-пакетов: новый каталог
-`research/verifast-review/<полный-SHA-этого-checkpoint>/` поверх актуальной головы
-`review/verifast`. Предыдущая публикация15ab65bebe4d61bd197cb5feca4e26fb740eaf7c
-и пакетd1d533d… сохраняются. Полные instructions/status, review, исходный патч,
-tool diff/bundle/tests, PR draft, Cloud-план и provenance manifest входят в новый
-пакет. Фактический publication commit/remote/API hash receipt фиксируется после
-создания этого immutable checkpoint, во внешнем receipt и финальном отчёте.
-Никаких upstream push/issues/PR/fork, main merge или pin adoption не разрешено.
+Own infra branch `Tiramisu-Cake/verify-rust-std:infra/verifast-mdnew-cfg`; final
+organizational infra SHA is recorded in packet manifest and publication receipt.
+This local VeriFast organizational commit is the immutable checkpoint identifier;
+publication adds only research/verifast-review/FULL-CHECKPOINT-SHA/ on review/verifast.
+Previous packets are preserved. Main, proof branches/indexes/ledgers/pins and
+upstream repositories were not changed.
 
-Одно следующее задание: отдельно разрешить реализацию и служебные проверки
-`verifast-mdnew-cfg` lane доставки incremental tool bundle с original Git
-identities. Dispatcher/роль/phase/budget подключаются только в новом поручении;
-до этого сборки не запускаются. Текущая сессия после публикации закрывается.
+Continuation requires a new explicit authorized phase/window/budget; this phase
+and its historical ledger must not be reopened or reset. Status/download commands
+for recorded Builds remain available after expiry. See infrastructure
+verifast-mdnew/CONTINUATION.md for exact read-only commands and the next assignment.
+
+One next assignment: resolve the false-unwind fixture's unmarked dead code, create a new exact test/tool bundle pin if bytes change, and rerun all focused gates with the capture-log correction in a new authorized Cloud phase.

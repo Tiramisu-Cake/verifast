@@ -145,3 +145,27 @@ contains exact inputs, acceptance criteria and the smallest delivery addition.
 Next assignment: implement and service-test the pinned incremental tool-bundle
 restore lane under a separate infrastructure authorization, without dispatching
 proofs until owner `verifast` has its own approved phase and budget.
+
+
+## Authorized Cloud delivery phase — 2026-10-09
+
+New direct assignment supersedes the previous zero Cloud budget and read-only
+coordinator scope. Independent own phase/ledger verifast,3600seconds, main
+15:27:32–16:27:32UTC and finish-only until16:57:32UTC.
+[Infrastructure, transport and checks](../cloud/verifast-mdnew-20261009.md).
+Portable protocol487dc39ccea94e29f203b7a57baf87d71d539038 published; livev2/max2
+retained until peer adoption/locked migration. Delivery/source pin
+6c51e8c1c9ec6a1be45a0c974accffd42cb6ca92 published/API-verified; original tool
+candidate1435539475fdaa7810bc2bc780fba0514f765f48 and tree unchanged.
+Build9082cb24-4616-4d2d-b8e7-ab6bdb790cba submitted through existing coordinator.
+Execution/evidence verdict and accounting are recorded in current STATUS and
+immutable package, not inferred from submission. No semantic translator fix,
+proof-agent integration, pin adoption, upstream publication or acceptance.
+
+Closed result: three terminalFAILURE Builds,786/3600seconds, no own reservation.
+Pinned source restoration and two-console compilation succeeded; last attempt
+observed baseline forget dead-code and candidate forget exit0, but capture logs
+were incomplete and original false-unwind allow run had additional unmarked dead
+code. Overall INCONCLUSIVE, no focused acceptance. Capture-log correction
+cbfe28393e1e61aacf0957466ee91e9243b25d2f is locally service-tested; Cloud NOT_RUN.
+All details and one next assignment are in current STATUS/session evidence.
