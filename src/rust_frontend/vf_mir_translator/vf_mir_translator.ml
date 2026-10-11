@@ -3115,7 +3115,8 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
             let address = Ast.AddressOf (loc, place) in
             let call name args = Ast.CallExpr (loc, name, [], [], List.map (fun e -> Ast.LitPat e) args, Ast.Static) in
             let ghost name args = Ast.PureStmt (loc, Ast.ExprStmt (call name args)) in
-            let finish = [ghost "close_points_to" [receiver]; ghost "end_ref_mut" [receiver]] in
+            let finish = [ghost "close_points_to" [receiver]; ghost "end_ref_mut" [receiver];
+                          ghost "open_points_to" [address]] in
             let unwind_stmts, unwind_targets = translate_unwind_action (unwind_action_get drop_data_cpn) loc in
             let call_stmt = Ast.SwitchStmt (loc, call selected_path [receiver], [
               Ast.SwitchStmtClause (loc, call "returning" [Ast.Var (loc, "__result")], finish);
