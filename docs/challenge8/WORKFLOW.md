@@ -161,19 +161,18 @@ bootstrap/x.py, proof runners/extractors и полноценные tool-regressi
 как build input. Доступность такого входа проверять отдельно от наличия GitHub-форка.
 
 Действующий протокол описан в proof-repo: `research/challenge-8/cloud-build/README.md`
-и `PARALLEL-BUILDS.md`; клиенты — `control.py`/`coordination.py`. Shared state:
-`/root/smallsort-ci-coordination/active.json`, lock: соседний `lock`. При активном v2 максимум два queued/running/unresolved Cloud Build суммарно,
-один на owner и ledger. Подготовленный v3 допускает три стабильных owners
-(select-sort4, merge, verifast) и три слота только после подтверждения всех
-клиентов и миграции под общим lock; старый клиент обязан отказать на новом
-протоколе. Активные записи не удалять и не обнулять. Точный переносимый commit
+и `PARALLEL-BUILDS-V3.md`; клиенты — `control.py`/`coordination.py`. Shared state:
+`/root/smallsort-ci-coordination/active.json`, lock: соседний `lock`. Активный v3 допускает максимум три queued/running/unresolved Cloud Build суммарно,
+один на owner и ledger (select-sort4, merge, verifast). Миграция разрешена владельцем
+и выполнена после свежих ACK трёх клиентов под общим flock 2026-10-11 UTC;
+старый клиент обязан отказать на новом протоколе. Активные записи не удалять и не обнулять. Точный переносимый commit
 и порядок принятия сохранены в [Cloud checkpoint](cloud/verifast-mdnew-validation-20261009.md).
 Request носит advisory-характер; admission и token reservation обязательны.
 Неопределённый submit занимает слот до terminal API evidence или окончательного
 подтверждения отказа; timeout клиента не разрешает повторный submit/снятие слота.
 Чужие reservations/ledgers не исправлять. Перед разрешённым Cloud-заданием
 перечитать актуальный протокол из точного commit; старые single-slot правила
-не применять вместо согласованного v2. Статус Cloud конкретной сессии
+не применять вместо согласованного v3. Статус Cloud конкретной сессии
 фиксируется в STATUS и карточке.
 
 ## Upstream и временная работа без форка

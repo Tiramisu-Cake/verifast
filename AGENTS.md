@@ -37,7 +37,7 @@ parsing и только малые изолированные tests служеб
 WORK-POLICY. Компиляция VeriFast/Rust, proof execution и полноценные регрессии —
 только в Cloud; тяжёлые build dependencies на VPS не устанавливать.
 Для каждой новой сессии owner `verifast` нужны отдельные разрешённые фаза, бюджет, ledger и
-подключение к существующему coordinator: максимум два queued/running/unresolved
+подключение к существующему coordinator: максимум три queued/running/unresolved
 Build суммарно и один на owner/ledger. Исторические бюджеты не наследуются.
 
 Использовать точные SHA и состав профиля, различать candidate, regression,
