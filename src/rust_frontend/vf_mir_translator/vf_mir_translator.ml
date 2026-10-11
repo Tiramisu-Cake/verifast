@@ -3179,6 +3179,21 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
             let ghost name args = Ast.PureStmt (loc, Ast.ExprStmt (call name args)) in
             let finish = [ghost "close_points_to" [receiver]; ghost "end_ref_mut" [receiver];
                           ghost "open_points_to" [address]] in
+            (* Separately profiled fault-injection controls for the qualified
+               caller interface only. The unset path is exactly the ordinary
+               finish above; compiler-owned glue is never changed. *)
+            let finish = match Sys.getenv_opt "SMALLSORT_DROP_RECEIVER_CONTROL", generated_call with
+              | None, _ -> finish
+              | Some "omit_end", Some _ ->
+                  [ghost "close_points_to" [receiver]; ghost "open_points_to" [address]]
+              | Some "wrong_end", Some _ ->
+                  [ghost "close_points_to" [receiver]; ghost "end_ref_mut" [address];
+                   ghost "open_points_to" [address]]
+              | Some "duplicate_end", Some _ ->
+                  [ghost "close_points_to" [receiver]; ghost "end_ref_mut" [receiver];
+                   ghost "end_ref_mut" [receiver]; ghost "open_points_to" [address]]
+              | Some _, _ -> Ast.static_error loc "Unsupported generated Drop receiver diagnostic" None
+            in
             let unwind_stmts, unwind_targets = translate_unwind_action (unwind_action_get drop_data_cpn) loc in
             let call_name = match generated_call with
               | Some key -> key | None -> selected_path in
