@@ -788,7 +788,7 @@ use rustc_span::RemapPathScopeComponents;
             let mut observation = String::new();
             use std::fmt::Write as _;
 
-            writeln!(observation, "format=small-sort-drop-glue-observation-v1").unwrap();
+            writeln!(observation, "format=small-sort-drop-glue-observation-v2").unwrap();
             writeln!(observation, "observation_sequence={sequence}").unwrap();
             writeln!(observation, "caller_def_path={}", tcx.def_path_str(caller_def_id)).unwrap();
             writeln!(observation, "caller_def_path_hash={caller_hash}").unwrap();
@@ -808,6 +808,16 @@ use rustc_span::RemapPathScopeComponents;
             writeln!(observation, "resolved_instance_def_path_hash={:?}", tcx.def_path_hash(instance.def_id())).unwrap();
             writeln!(observation, "resolved_instance_args={:?}", instance.args).unwrap();
             writeln!(observation, "glue_body_source_instance={:?}", glue_body.source.instance).unwrap();
+            for (local, decl) in glue_body.local_decls.iter_enumerated() {
+                writeln!(observation, "glue_local index={local:?} type={:?} name={:?}", decl.ty, decl.name).unwrap();
+            }
+            let ref_rvalue_count = glue_body.basic_blocks.iter().flat_map(|block| block.statements.iter()).filter(|statement| {
+                matches!(&statement.kind, mir::StatementKind::Assign(assign) if matches!(&assign.1, mir::Rvalue::Ref(..)))
+            }).count();
+            let storage_dead_count = glue_body.basic_blocks.iter().flat_map(|block| block.statements.iter()).filter(|statement| {
+                matches!(&statement.kind, mir::StatementKind::StorageDead(..))
+            }).count();
+            writeln!(observation, "glue_receiver_form_observation ref_rvalue_count={ref_rvalue_count} storage_dead_count={storage_dead_count}").unwrap();
 
             writeln!(observation, "\n--- full raw MIR pretty ---").unwrap();
             observation.push_str(&crate::mir_utils::mir_body_pretty_string(tcx, glue_body));
@@ -832,6 +842,32 @@ use rustc_span::RemapPathScopeComponents;
                                 *callee_def_id == destructor,
                             )
                             .unwrap();
+                            match ty::Instance::try_resolve(
+                                tcx,
+                                ty::TypingEnv::fully_monomorphized(),
+                                *callee_def_id,
+                                *callee_args,
+                            ) {
+                                Ok(Some(callee_instance)) => {
+                                    let resolved_selected_drop_match = callee_instance.def_id() == destructor;
+                                    writeln!(observation, "call_resolve block={block_id:?} status=resolved instance={callee_instance:?}").unwrap();
+                                    writeln!(observation, "call_resolved_def_path block={block_id:?} path={} hash={:?} selected_drop_match={resolved_selected_drop_match}", tcx.def_path_str(callee_instance.def_id()), tcx.def_path_hash(callee_instance.def_id())).unwrap();
+                                    writeln!(observation, "call_resolved_kind block={block_id:?} kind={:?} args={:?} type={:?}", callee_instance.def, callee_instance.args, callee_instance.ty(tcx, ty::TypingEnv::fully_monomorphized())).unwrap();
+                                    if resolved_selected_drop_match {
+                                        let selected_body = tcx.instance_mir(callee_instance.def);
+                                        let selected_debug = format!("{selected_body:#?}");
+                                        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                                        use std::hash::{Hash, Hasher};
+                                        selected_debug.hash(&mut hasher);
+                                        writeln!(observation, "selected_method_mir_debug_hash={:016x} hash_kind=DefaultHasher-of-Debug-output instance_args={:?}", hasher.finish(), callee_instance.args).unwrap();
+                                        writeln!(observation, "\n--- resolved selected method raw MIR pretty ---").unwrap();
+                                        observation.push_str(&crate::mir_utils::mir_body_pretty_string(tcx, selected_body));
+                                        writeln!(observation, "\n--- resolved selected method raw MIR debug ---\n{selected_debug}").unwrap();
+                                    }
+                                }
+                                Ok(None) => writeln!(observation, "call_resolve block={block_id:?} status=unresolved-none").unwrap(),
+                                Err(_) => writeln!(observation, "call_resolve block={block_id:?} status=unresolved-error").unwrap(),
+                            }
                         }
                     }
                     mir::TerminatorKind::Drop { place, target, unwind, .. } => {
