@@ -2687,13 +2687,14 @@ use rustc_span::RemapPathScopeComponents;
             let src_info_cpn = terminator_cpn.reborrow().init_source_info();
             Self::encode_source_info(tcx, &terminator.source_info, src_info_cpn);
             let terminator_kind_cpn = terminator_cpn.init_kind();
-            Self::encode_terminator_kind(tcx, enc_ctx, &terminator.kind, terminator_kind_cpn);
+            Self::encode_terminator_kind(tcx, enc_ctx, &terminator.kind, terminator.source_info.span, terminator_kind_cpn);
         }
 
         fn encode_terminator_kind(
             tcx: TyCtxt<'tcx>,
             enc_ctx: &mut EncCtx<'tcx, 'a>,
             terminator_kind: &mir::TerminatorKind<'tcx>,
+            source_span: Span,
             mut terminator_kind_cpn: terminator_kind_cpn::Builder<'_>,
         ) {
             match terminator_kind {
@@ -2772,7 +2773,7 @@ use rustc_span::RemapPathScopeComponents;
                                     Self::observe_selected_drop_glue(
                                         tcx,
                                         enc_ctx.body(),
-                                        terminator.source_info.span,
+                                        source_span,
                                         *adt,
                                         did,
                                         place_ty,
