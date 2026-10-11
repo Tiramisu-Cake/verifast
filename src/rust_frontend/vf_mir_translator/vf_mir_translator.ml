@@ -6127,11 +6127,11 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
             State.selected_resume_targets := List.filter_map (fun block ->
               match TerminatorKindRd.get (TerminatorRd.kind_get (BasicBlockRd.terminator_get block)) with
               | TerminatorKindRd.Drop data when List.mem
-                  (TrName.translate_def_path (DropData.selected_drop_path_get data),
-                   DropData.selected_drop_hash_get data,
-                   TrName.translate_def_path (DropData.selected_guard_path_get data))
+                  (TrName.translate_def_path (TerminatorKindRd.DropData.selected_drop_path_get data),
+                   TerminatorKindRd.DropData.selected_drop_hash_get data,
+                   TrName.translate_def_path (TerminatorKindRd.DropData.selected_guard_path_get data))
                   Args.body_tr_defs_ctx.selected_drops ->
-                  (match UnwindActionRd.get (DropData.unwind_action_get data) with
+                  (match UnwindActionRd.get (TerminatorKindRd.DropData.unwind_action_get data) with
                    | UnwindActionRd.Cleanup target ->
                        let id = translate_basic_block_id target in
                        (match List.find_opt (fun block ->
