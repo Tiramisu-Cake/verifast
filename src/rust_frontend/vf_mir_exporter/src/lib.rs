@@ -1401,6 +1401,7 @@ use rustc_span::RemapPathScopeComponents;
 
             let def_path = tcx.def_path_str(def_id);
             body_cpn.set_def_path(&def_path);
+            body_cpn.set_def_path_hash(&format!("{:?}", tcx.def_path_hash(def_id)));
 
             let parent_module = tcx.parent_module_from_def_id(def_id.expect_local());
             if parent_module != rustc_span::def_id::CRATE_MOD_ID {
@@ -2634,6 +2635,21 @@ use rustc_span::RemapPathScopeComponents;
                     Self::encode_place(enc_ctx, place, drop_data_cpn.reborrow().init_place());
                     Self::encode_basic_block_id(*target, drop_data_cpn.reborrow().init_target());
                     Self::encode_unwind_action(unwind, drop_data_cpn.reborrow().init_unwind_action());
+                    drop_data_cpn.set_is_bare_local(place.projection.is_empty());
+                    drop_data_cpn.set_is_replace(*replace);
+                    let place_ty = place.ty(&enc_ctx.body().local_decls, tcx).ty;
+                    if let ty::Adt(adt, args) = place_ty.kind() {
+                        if args.is_empty() && adt.did().is_local() {
+                            if let Some(destructor) = adt.destructor(tcx) {
+                                let did = destructor.did;
+                                if did.is_local() {
+                                    drop_data_cpn.set_selected_guard_path(&tcx.def_path_str(adt.did()));
+                                    drop_data_cpn.set_selected_drop_path(&tcx.def_path_str(did));
+                                    drop_data_cpn.set_selected_drop_hash(&format!("{:?}", tcx.def_path_hash(did)));
+                                }
+                            }
+                        }
+                    }
                 }
                 mir::TerminatorKind::TailCall { .. } => terminator_kind_cpn.set_tail_call(()),
                 mir::TerminatorKind::Assert {

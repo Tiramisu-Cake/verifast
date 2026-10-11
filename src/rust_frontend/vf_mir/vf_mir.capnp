@@ -773,6 +773,11 @@ struct TerminatorKind {
         place @0: Place;
         target @1: BasicBlockId;
         unwindAction @2: UnwindAction;
+        selectedDropPath @3: Text;
+        selectedDropHash @4: Text;
+        selectedGuardPath @5: Text;
+        isBareLocal @6: Bool;
+        isReplace @7: Bool;
     }
 
     struct AssertData {
@@ -880,6 +885,7 @@ struct Body {
     clauses @17: List(Clause);
     isTraitFn @12: Bool;
     isDropFn @13: Bool; # Implements std::ops::Drop::drop
+    defPathHash @26: Text;
     visibility @22: Visibility;
 }
 

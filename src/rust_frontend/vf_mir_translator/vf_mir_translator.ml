@@ -1927,6 +1927,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
     translate_ty (D.decode_ty ty_cpn) loc
 
   type body_tr_defs_ctx = {
+    selected_drops : (string * string * string) list;
     adt_defs : Mir.adt_def_tr list;
     ghost_decl_map : (string * Ast.decl) list;
     directives : Mir.annot list;
@@ -3100,6 +3101,33 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
           let* place, place_is_mutable = translate_place place_cpn loc in
           let target_cpn = target_get drop_data_cpn in
           let target = translate_basic_block_id target_cpn in
+          let selected_path = TrName.translate_def_path (selected_drop_path_get drop_data_cpn) in
+          let selected_hash = selected_drop_hash_get drop_data_cpn in
+          let guard_path = TrName.translate_def_path (selected_guard_path_get drop_data_cpn) in
+          let selected = List.mem (selected_path, selected_hash, guard_path)
+            Args.body_tr_defs_ctx.selected_drops in
+          if selected then begin
+            if not (is_bare_local_get drop_data_cpn) || is_replace_get drop_data_cpn
+                || not place_is_mutable || TranslatorArgs.ignore_unwind_paths then
+              Ast.static_error loc "Qualified selected Drop requires mutable bare local, replace=false and unwind checking" None;
+            let receiver_name = "__vf_drop_receiver_" ^ target in
+            let receiver = Ast.Var (loc, receiver_name) in
+            let address = Ast.AddressOf (loc, place) in
+            let call name args = Ast.CallExpr (loc, name, [], [], List.map (fun e -> Ast.LitPat e) args, Ast.Static) in
+            let ghost name args = Ast.PureStmt (loc, Ast.ExprStmt (call name args)) in
+            let finish = [ghost "close_points_to" [receiver]; ghost "end_ref_mut" [receiver]] in
+            let unwind_stmts, unwind_targets = translate_unwind_action (unwind_action_get drop_data_cpn) loc in
+            let call_stmt = Ast.SwitchStmt (loc, call selected_path [receiver], [
+              Ast.SwitchStmtClause (loc, call "returning" [Ast.Var (loc, "__result")], finish);
+              Ast.SwitchStmtClause (loc, call "unwinding" [], finish @ unwind_stmts)]) in
+            Ok ([ghost "close_points_to" [address];
+                 Ast.DeclStmt (loc, [(loc, Some (Ast.PtrTypeExpr (loc,
+                   Ast.StructTypeExpr (loc, Some guard_path, None, [], []))),
+                   receiver_name, Some (call "fn_outcome_result" [call "create_ref_mut" [address]]),
+                   (ref false, ref None))]);
+                 ghost "open_points_to" [receiver]; call_stmt],
+                Mir.GotoTerminator (loc, target), target :: unwind_targets)
+          end else
           let unfreeze_stmts, freeze_stmts =
             if place_is_mutable then ([], [])
             else
@@ -9046,8 +9074,25 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
             bodies_cpn
         else bodies_cpn
       in
+      let selected_drops = List.filter_map (fun body ->
+        if not (BodyRd.is_drop_fn_get body) ||
+           BodyRd.generics_get_list body <> [] ||
+           BodyRd.impl_block_generics_get_list body <> [] ||
+           Capnp.Array.is_empty (ContractRd.annotations_get (BodyRd.contract_get body)) then None
+        else match BodyRd.inputs_get_list body with
+        | [input] -> begin match decode_ty (D.decode_ty input) with
+          | `Ref (_, _, `Adt (id, _, [])) ->
+              let guard = id in
+              begin match concrete_drop_effect_decl ghost_decl_map adt_defs guard [] [] with
+              | None -> None
+              | Some _ -> Some (TrName.translate_def_path (BodyRd.def_path_get body),
+                                BodyRd.def_path_hash_get body, guard)
+              end
+          | _ -> None
+          end
+        | _ -> None) bodies_cpn in
       let body_tr_defs_ctx =
-        { adt_defs; ghost_decl_map; directives = vf_mir_translator_directives; fn_specializer }
+        { selected_drops; adt_defs; ghost_decl_map; directives = vf_mir_translator_directives; fn_specializer }
       in
       let* bodies_tr_res =
         Rocq_writer.rocq_print Args.rocq_writer "Definition bodies := ";
