@@ -6130,7 +6130,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                   (TrName.translate_def_path (TerminatorKindRd.DropData.selected_drop_path_get data),
                    TerminatorKindRd.DropData.selected_drop_hash_get data,
                    TrName.translate_def_path (TerminatorKindRd.DropData.selected_guard_path_get data))
-                  Args.body_tr_defs_ctx.selected_drops ->
+                  body_tr_defs_ctx.selected_drops ->
                   (match UnwindActionRd.get (TerminatorKindRd.DropData.unwind_action_get data) with
                    | UnwindActionRd.Cleanup target ->
                        let id = translate_basic_block_id target in
