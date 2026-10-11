@@ -732,6 +732,136 @@ use rustc_span::RemapPathScopeComponents;
             msg_cpn
         }
 
+        // This is a diagnostic observation only. It deliberately does not add
+        // generated glue to the Cap'n Proto output or affect ordinary exports.
+        // The opt-in is useful for checking the exact compiler Instance and MIR
+        // selected for the concrete local Drop terminator below.
+        fn observe_selected_drop_glue(
+            tcx: TyCtxt<'tcx>,
+            caller_body: &mir::Body<'tcx>,
+            caller_span: Span,
+            guard: ty::AdtDef<'tcx>,
+            destructor: rustc_hir::def_id::DefId,
+            drop_ty: ty::Ty<'tcx>,
+        ) {
+            let Some(observation_dir) = std::env::var_os("SMALLSORT_GLUE_OBSERVATION_DIR") else {
+                return;
+            };
+            static INVOCATION_DIR: std::sync::OnceLock<std::path::PathBuf> =
+                std::sync::OnceLock::new();
+            let base_dir = std::path::PathBuf::from(observation_dir);
+            let observation_dir = INVOCATION_DIR.get_or_init(|| {
+                assert!(
+                    !base_dir.as_os_str().is_empty(),
+                    "SMALLSORT_GLUE_OBSERVATION_DIR must name a directory"
+                );
+                std::fs::create_dir_all(&base_dir).unwrap_or_else(|error| {
+                    panic!("cannot create glue observation directory {base_dir:?}: {error}")
+                });
+                let nonce = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .expect("system clock is before the Unix epoch")
+                    .as_nanos();
+                let invocation_dir = base_dir.join(format!(
+                    "exporter-{}-{nonce}",
+                    std::process::id()
+                ));
+                std::fs::create_dir(&invocation_dir).unwrap_or_else(|error| {
+                    panic!("cannot create unique glue observation directory {invocation_dir:?}: {error}")
+                });
+                invocation_dir
+            });
+
+            let caller_def_id = caller_body.source.def_id();
+            let caller_hash = format!("{:?}", tcx.def_path_hash(caller_def_id));
+            let guard_hash = format!("{:?}", tcx.def_path_hash(guard.did()));
+            let caller_instance = format!("{:?}", caller_body.source.instance);
+            let caller_instance_id = caller_instance
+                .chars()
+                .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
+                .collect::<String>();
+            let span_data = caller_span.data();
+            let file_name = format!(
+                "caller_{}_instance_{}_guard_{}_lo{}_hi{}.txt",
+                caller_hash,
+                caller_instance_id,
+                guard_hash,
+                span_data.lo.as_u32(),
+                span_data.hi.as_u32(),
+            );
+            let path = observation_dir.join(file_name);
+
+            let instance = ty::Instance::resolve_drop_glue(tcx, drop_ty);
+            let glue_body = tcx.instance_mir(instance.def);
+            let mut observation = String::new();
+            use std::fmt::Write as _;
+
+            writeln!(observation, "format=small-sort-drop-glue-observation-v1").unwrap();
+            writeln!(observation, "caller_def_path={}", tcx.def_path_str(caller_def_id)).unwrap();
+            writeln!(observation, "caller_def_path_hash={caller_hash}").unwrap();
+            writeln!(observation, "caller_instance={caller_instance}").unwrap();
+            writeln!(observation, "drop_source_span={span_data:?}").unwrap();
+            writeln!(observation, "drop_place_type={drop_ty:?}").unwrap();
+            writeln!(observation, "guard_def_path={}", tcx.def_path_str(guard.did())).unwrap();
+            writeln!(observation, "guard_def_path_hash={guard_hash}").unwrap();
+            writeln!(observation, "selected_drop_def_path={}", tcx.def_path_str(destructor)).unwrap();
+            writeln!(observation, "selected_drop_def_path_hash={:?}", tcx.def_path_hash(destructor)).unwrap();
+            writeln!(observation, "selected_drop_signature={:?}", tcx.fn_sig(destructor)).unwrap();
+            writeln!(observation, "resolved_instance={instance:?}").unwrap();
+            writeln!(observation, "resolved_instance_kind={:?}", instance.def).unwrap();
+            writeln!(observation, "resolve_drop_glue_typing_env={:?}", ty::TypingEnv::fully_monomorphized()).unwrap();
+            writeln!(observation, "resolved_instance_type={:?}", instance.ty(tcx, ty::TypingEnv::fully_monomorphized())).unwrap();
+            writeln!(observation, "resolved_instance_def_path={}", tcx.def_path_str(instance.def_id())).unwrap();
+            writeln!(observation, "resolved_instance_def_path_hash={:?}", tcx.def_path_hash(instance.def_id())).unwrap();
+            writeln!(observation, "resolved_instance_args={:?}", instance.args).unwrap();
+            writeln!(observation, "glue_body_source_instance={:?}", glue_body.source.instance).unwrap();
+
+            writeln!(observation, "\n--- full raw MIR pretty ---").unwrap();
+            observation.push_str(&crate::mir_utils::mir_body_pretty_string(tcx, glue_body));
+            writeln!(observation, "\n--- full raw MIR debug ---\n{glue_body:#?}").unwrap();
+            writeln!(observation, "--- call/drop edge observations ---").unwrap();
+            for (block_id, block) in glue_body.basic_blocks.iter_enumerated() {
+                let terminator = block.terminator();
+                match &terminator.kind {
+                    mir::TerminatorKind::Call { func, target, unwind, .. } => {
+                        let callee_ty = func.ty(&glue_body.local_decls, tcx);
+                        writeln!(
+                            observation,
+                            "call block={block_id:?} callee={func:?} callee_type={callee_ty:?} normal_target={target:?} unwind={unwind:?}"
+                        )
+                        .unwrap();
+                        if let ty::TyKind::FnDef(callee_def_id, callee_args) = callee_ty.kind() {
+                            writeln!(
+                                observation,
+                                "call_signature block={block_id:?} def_path={} signature={:?} args={callee_args:?} selected_drop_match={}",
+                                tcx.def_path_str(*callee_def_id),
+                                tcx.fn_sig(*callee_def_id),
+                                *callee_def_id == destructor,
+                            )
+                            .unwrap();
+                        }
+                    }
+                    mir::TerminatorKind::Drop { place, target, unwind, .. } => {
+                        writeln!(
+                            observation,
+                            "drop block={block_id:?} place={place:?} place_type={:?} normal_target={target:?} unwind={unwind:?}",
+                            place.ty(&glue_body.local_decls, tcx).ty,
+                        )
+                        .unwrap();
+                    }
+                    _ => {}
+                }
+            }
+
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&path)
+                .unwrap_or_else(|error| panic!("cannot create unique glue observation {path:?}: {error}"));
+            std::io::Write::write_all(&mut file, observation.as_bytes())
+                .unwrap_or_else(|error| panic!("cannot write glue observation {path:?}: {error}"));
+        }
+
         fn encode_trait_impls(&mut self, vf_mir_cpn: &mut vf_mir_cpn::Builder<'_>) {
             let mut enc_ctx = EncCtx::new(self.tcx, EncKind::Other, LinkedList::new(), Vec::new());
             vf_mir_cpn.fill_trait_impls(&self.trait_impls, |mut trait_impl_cpn, trait_impl| {
@@ -2646,6 +2776,14 @@ use rustc_span::RemapPathScopeComponents;
                                     drop_data_cpn.set_selected_guard_path(&tcx.def_path_str(adt.did()));
                                     drop_data_cpn.set_selected_drop_path(&tcx.def_path_str(did));
                                     drop_data_cpn.set_selected_drop_hash(&format!("{:?}", tcx.def_path_hash(did)));
+                                    Self::observe_selected_drop_glue(
+                                        tcx,
+                                        enc_ctx.body(),
+                                        terminator.source_info.span,
+                                        *adt,
+                                        did,
+                                        place_ty,
+                                    );
                                 }
                             }
                         }
