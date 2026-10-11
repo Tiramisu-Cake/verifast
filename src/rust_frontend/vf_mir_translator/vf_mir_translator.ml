@@ -1928,10 +1928,21 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
 
   type body_tr_defs_ctx = {
     selected_drops : (string * string * string) list;
+    generated_glue : generated_glue_binding option;
     adt_defs : Mir.adt_def_tr list;
     ghost_decl_map : (string * Ast.decl) list;
     directives : Mir.annot list;
     fn_specializer : string -> D.generic_arg list -> string * D.generic_arg list;
+  }
+
+  and generated_glue_binding = {
+    glue_key : string;
+    glue_guard : string;
+    glue_selected_path : string;
+    glue_selected_hash : string;
+    glue_raw_trait_path : string;
+    glue_raw_trait_hash : string;
+    glue_method_body : BodyRd.t;
   }
 
   type var_id_trs_entry = { id : string; internal_name : string }
@@ -1944,6 +1955,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
     val ghost_stmts : Ast.stmt list
     val body_imp_loc : Ast.loc
     val body_tr_defs_ctx : body_tr_defs_ctx
+    val is_generated_glue : bool
     val strict_lft_scope_ends : (Ast.loc * string) list
     val callback_close : (Ast.loc * string * Ast.stmt) option
     val callback_recover : Ast.stmt option
@@ -1965,6 +1977,8 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
       let callback_unwind_label = "#merge_callback_unwind_epilogue"
       let selected_resume_targets : string list ref = ref []
       let translating_selected_resume = ref false
+      let generated_glue = Args.body_tr_defs_ctx.generated_glue
+      let is_generated_glue = Args.is_generated_glue
       let hrtb_fnmut_output_bounds : (string * string) list ref = ref []
       let pending_hrtb_projection_eq : Ast.stmt list ref = ref []
 
@@ -2464,6 +2478,30 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
       | `TrTypedConstantFn fn_def_ty_cpn -> (
           let fn_name = fn_def_ty_cpn.id.name in
           let substs_cpn = fn_def_ty_cpn.substs in
+          if State.is_generated_glue then begin
+            let binding = match State.generated_glue with
+              | Some binding -> binding
+              | None -> Ast.static_error call_loc "Unbound generated Drop glue" None in
+            let raw_trait = canonicalize_item_name fn_name in
+            let expected_trait = canonicalize_item_name binding.glue_raw_trait_path in
+            let concrete_guard = match substs_cpn with
+              | [{ D.kind = D.Type ty }] ->
+                  (match decode_ty ty with
+                   | `Adt (guard, _, []) -> Some guard
+                   | _ -> None)
+              | _ -> None in
+            if raw_trait <> expected_trait ||
+               concrete_guard <> Some binding.glue_guard ||
+               fn_def_ty_cpn.late_bound_generic_param_count <> 1 ||
+               List.length args_cpn <> 1 || tmp_rvalue_binders <> [] ||
+               (match args with [Ast.Var _] -> false | _ -> true) then
+              Ast.static_error call_loc
+                "Generated Drop trait call differs from the resolved local instance" None;
+            Ok ([], FnCallOutcome
+              (Ast.CallExpr (fn_loc, binding.glue_selected_path,
+                 [Ast.InferredTypeExpr call_loc], [],
+                 [Ast.LitPat (List.hd args)], Ast.Static)))
+          end else
           let fn_name = translate_fn_name fn_name substs_cpn in
           let substs_cpn =
             substs_cpn
@@ -2782,7 +2820,8 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
       | Continue ->
           ( [
               Ast.ReturnStmt
-                (loc, Some (Ast.CallExpr (loc, "unwinding", [], [], [], Static)));
+                ((if State.is_generated_glue then Ast.DummyLoc else loc),
+                 Some (Ast.CallExpr (loc, "unwinding", [], [], [], Static)));
             ],
             [] )
       | Unreachable -> ([ Ast.Assert (loc, Ast.False loc) ], [])
@@ -3108,6 +3147,27 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
           let guard_path = TrName.translate_def_path (selected_guard_path_get drop_data_cpn) in
           let selected = List.mem (selected_path, selected_hash, guard_path)
             Args.body_tr_defs_ctx.selected_drops in
+          let generated_body_key = generated_body_key_get drop_data_cpn in
+          let generated_call = match Args.body_tr_defs_ctx.generated_glue with
+            | None ->
+                if generated_body_key <> "" then
+                  Ast.static_error loc "Drop references an absent generated glue body" None;
+                None
+            | Some binding ->
+                if generated_body_key = "" then begin
+                  if selected_path = binding.glue_selected_path &&
+                     selected_hash = binding.glue_selected_hash &&
+                     guard_path = binding.glue_guard then
+                    Ast.static_error loc "Selected Drop is missing its generated glue reference" None;
+                  None
+                end
+                else if not selected ||
+                        generated_body_key <> binding.glue_key ||
+                        selected_path <> binding.glue_selected_path ||
+                        selected_hash <> binding.glue_selected_hash ||
+                        guard_path <> binding.glue_guard then
+                  Ast.static_error loc "Drop generated glue reference does not match the selected method" None
+                else Some binding.glue_key in
           if selected then begin
             if not (is_bare_local_get drop_data_cpn) || is_replace_get drop_data_cpn
                 || not place_is_mutable || TranslatorArgs.ignore_unwind_paths then
@@ -3120,7 +3180,9 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
             let finish = [ghost "close_points_to" [receiver]; ghost "end_ref_mut" [receiver];
                           ghost "open_points_to" [address]] in
             let unwind_stmts, unwind_targets = translate_unwind_action (unwind_action_get drop_data_cpn) loc in
-            let selected_call = Ast.CallExpr (loc, selected_path, [Ast.InferredTypeExpr loc], [],
+            let call_name = match generated_call with
+              | Some key -> key | None -> selected_path in
+            let selected_call = Ast.CallExpr (loc, call_name, [Ast.InferredTypeExpr loc], [],
               [Ast.LitPat receiver], Ast.Static) in
             let call_stmt = Ast.SwitchStmt (loc, selected_call, [
               Ast.SwitchStmtClause (loc, call "returning" [Ast.Var (loc, "__result")], finish);
@@ -5289,6 +5351,8 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
   let translate_body (body_tr_defs_ctx : body_tr_defs_ctx) (body_cpn : BodyRd.t)
       =
     let open BodyRd in
+    let is_generated_glue =
+      VfMirRd.GeneratedGlue.enabled_get (generated_glue_get body_cpn) in
     (* This is a source-admission count, not a parser for annotations.  Every
        occurrence must later be replaced in a parsed ghost expression. *)
     let stack_addr_spelling = "mir_stack_addr" in
@@ -5632,6 +5696,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
       let ghost_stmts = ghost_stmts
       let body_imp_loc = imp_loc
       let body_tr_defs_ctx = body_tr_defs_ctx
+      let is_generated_glue = is_generated_glue
       let strict_lft_scope_ends = strict_lft_scope_ends
       let callback_close = callback_close
       let callback_recover = callback_recover
@@ -5644,10 +5709,193 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
       ListAux.try_map translate_var_debug_info vdis_cpn
     in
     let env_map, trs_map = make_var_id_name_maps imp_loc vdis in
-    let _ = var_id_trs_map_ref := trs_map in
+    let _ = var_id_trs_map_ref :=
+      if is_generated_glue then
+        { id = TrName.tag_internal "_1"; internal_name = "self" } :: trs_map
+      else trs_map in
     let def_kind_cpn = def_kind_get body_cpn in
     let def_kind = DefKind.get def_kind_cpn in
     match def_kind with
+    | DefKind.Fn when is_generated_glue ->
+        let binding = match body_tr_defs_ctx.generated_glue with
+          | Some binding -> binding
+          | None -> Ast.static_error fn_sig_loc "Unbound generated Drop glue body" None in
+        let descriptor = generated_glue_get body_cpn in
+        if VfMirRd.GeneratedGlue.body_key_get descriptor <> binding.glue_key ||
+           TrName.translate_def_path (def_path_get body_cpn) <> binding.glue_key ||
+           vdis <> [] || ghost_stmts <> [] ||
+           ghost_decl_blocks_get_list body_cpn <> [] ||
+           loop_spec_blocks_get_list body_cpn <> [] ||
+           generics_get_list body_cpn <> [] ||
+           impl_block_generics_get_list body_cpn <> [] ||
+           not (Capnp.Array.is_empty
+             (ContractRd.annotations_get (contract_get body_cpn))) ||
+           TranslatorArgs.ignore_unwind_paths then
+          Ast.static_error fn_sig_loc "Generated Drop glue has unsupported declarations or configuration" None;
+        let inputs = inputs_get_list body_cpn |> List.map D.decode_ty in
+        let output = D.decode_ty (output_get body_cpn) in
+        let local_decls_cpn = local_decls_get_list body_cpn in
+        let receiver_type = match inputs with
+          | [input] ->
+              (match decode_ty input with
+               | `Ref (_, true, `Adt (guard, _, [])) ->
+                   guard = binding.glue_guard &&
+                   input = D.decode_ty (VfMirRd.GeneratedGlue.receiver_type_get descriptor)
+               | _ -> false)
+          | _ -> false in
+        if List.length inputs <> 1 || List.length local_decls_cpn <> 4 ||
+           decode_ty output <> `Tuple [] || not receiver_type ||
+           List.map (fun local -> LocalDeclIdRd.name_get (LocalDeclRd.id_get local))
+             local_decls_cpn <> ["_0"; "_1"; "_2"; "_3"] ||
+           (match local_decls_cpn, inputs with
+            | [ret; formal; copied; result], [input] ->
+                D.decode_ty (LocalDeclRd.ty_get ret) <> output ||
+                D.decode_ty (LocalDeclRd.ty_get formal) <> input ||
+                D.decode_ty (LocalDeclRd.ty_get copied) <> input ||
+                D.decode_ty (LocalDeclRd.ty_get result) <> output
+            | _ -> true) then
+          Ast.static_error fn_sig_loc "Generated Drop glue has a mismatched MIR signature" None;
+        let* _, selected_contract_opt =
+          translate_contract (contract_get binding.glue_method_body) in
+        let strong_contract = match selected_contract_opt with
+          | Some ((false, (None, Some _), Some (pre, post), false), false) ->
+              (match post with
+               | "outcome", Ast.SwitchExpr
+                   (_, _, [Ast.SwitchExprClause (_, "returning", ["result"], _);
+                            Ast.SwitchExprClause (_, "unwinding", [], Ast.False _)], None) ->
+                   (false, (None, None), Some (pre, post), false)
+               | _ -> Ast.static_error fn_sig_loc
+                   "Selected Drop method must have on_unwind_ens false" None)
+          | _ -> Ast.static_error fn_sig_loc
+              "Selected Drop method lacks the exact checked strong normal/unwind contract" None in
+        let name = binding.glue_key in
+        Rocq_writer.rocq_print_tuple Args.rocq_writer @@ fun () ->
+        Rocq_writer.rocq_print_tuple_element Args.rocq_writer begin fun () ->
+          Rocq_writer.rocq_print_string_literal Args.rocq_writer name
+        end;
+        Rocq_writer.rocq_print_tuple_element Args.rocq_writer @@ fun () ->
+        Rocq_writer.rocq_print_big_record Args.rocq_writer @@ fun () ->
+        let split_name = TrName.split_def_path (module_def_path_get body_cpn) name in
+        Rocq_writer.rocq_print_big_record_field Args.rocq_writer "inputs" begin fun () ->
+          Rocq_writer.rocq_print_small_list Args.rocq_writer @@ fun () ->
+          List.iter (fun ty ->
+            Rocq_writer.rocq_print_small_list_element Args.rocq_writer @@ fun () ->
+            Rocq_writer.rocq_print_data Args.rocq_writer Vf_mir_rocq.rocq_print_ty ty)
+            inputs
+        end;
+        Rocq_writer.rocq_print_big_record_field Args.rocq_writer "output" begin fun () ->
+          Rocq_writer.rocq_print_data Args.rocq_writer Vf_mir_rocq.rocq_print_ty output
+        end;
+        let* local_decls =
+          Rocq_writer.rocq_print_big_record_field Args.rocq_writer "local_decls" @@ fun () ->
+          Rocq_writer.rocq_print_big_list Args.rocq_writer @@ fun () ->
+          ListAux.try_map (fun local ->
+            Rocq_writer.rocq_print_big_list_element Args.rocq_writer @@ fun () ->
+            translate_local_decl local) local_decls_cpn in
+        let ret_place_decl :: param_decl :: other_decls = local_decls in
+        let* ret_ty_info = translate_decoded_ty output ret_place_decl.loc in
+        let ret_place_decl = { ret_place_decl with ty = lazy ret_ty_info } in
+        let* param_ty_info = translate_decoded_ty (List.hd inputs) param_decl.loc in
+        (* The generated MIR has the receiver type but no HIR lifetime binder.
+           Use the checked method's one late-bound receiver lifetime for the
+           private signature; this changes only the erased region spelling. *)
+        let* method_gens, _ =
+          translate_hir_generics (hir_generics_get binding.glue_method_body) in
+        let receiver_lft = match method_gens with
+          | [name, Hir.GenParamLifetime]
+            when String.length name > 1 && name.[0] = '\'' -> name
+          | _ -> Ast.static_error fn_sig_loc
+              "Selected Drop method must have one receiver lifetime binder" None in
+        (match inputs_get_list binding.glue_method_body with
+         | [input] ->
+             (match decode_ty (D.decode_ty input) with
+              | `Ref (region, true, `Adt (guard, _, []))
+                when region = receiver_lft && guard = binding.glue_guard -> ()
+              | _ -> Ast.static_error fn_sig_loc
+                  "Selected Drop method receiver does not use its checked lifetime" None)
+         | _ -> Ast.static_error fn_sig_loc
+             "Selected Drop method receiver arity changed" None);
+        let glue_tparams = [(receiver_lft, {Ast.sized = false})] in
+        let param_ty = match param_ty_info.vf_ty with
+          | Ast.RustRefTypeExpr (at, _, Ast.Mutable, guard_ty) ->
+              let ty = Ast.RustRefTypeExpr
+                (at, Ast.IdentTypeExpr (at, None, receiver_lft),
+                 Ast.Mutable, guard_ty) in
+              (match param_decl.mutability with
+               | Mir.Not -> Ast.ConstTypeExpr (param_decl.loc, ty)
+               | Mir.Mut -> ty)
+          | _ -> Ast.static_error fn_sig_loc
+              "Generated Drop receiver is not a mutable reference" None in
+        let* loc = translate_span_data (span_get body_cpn) in
+        let* closing_cbrace_loc = LocAux.get_last_col_loc loc in
+        let bblocks_cpn = basic_blocks_get_list body_cpn in
+        let bare_place place expected =
+          LocalDeclIdRd.name_get (PlaceRd.local_get place) = expected &&
+          PlaceRd.projection_get_list place = [] in
+        let exact_glue_cfg = match bblocks_cpn with
+          | [entry; normal] ->
+              Stdint.Uint32.to_string
+                (BasicBlockIdRd.index_get (BasicBlockRd.id_get entry)) = "0" &&
+              Stdint.Uint32.to_string
+                (BasicBlockIdRd.index_get (BasicBlockRd.id_get normal)) = "1" &&
+              not (BasicBlockRd.is_cleanup_get entry) &&
+              not (BasicBlockRd.is_cleanup_get normal) &&
+              (match BasicBlockRd.statements_get_list entry with
+               | [stmt] ->
+                   (match StatementKindRd.get (StatementRd.kind_get stmt) with
+                    | StatementKindRd.Assign data ->
+                        bare_place (StatementKindRd.AssignData.lhs_place_get data) "_2" &&
+                        (match RvalueRd.get
+                          (StatementKindRd.AssignData.rhs_rvalue_get data) with
+                         | RvalueRd.Use operand ->
+                             (match OperandRd.get operand with
+                              | OperandRd.Copy place -> bare_place place "_1"
+                              | _ -> false)
+                         | _ -> false)
+                    | _ -> false)
+               | _ -> false) &&
+              (match TerminatorKindRd.get
+                (TerminatorRd.kind_get (BasicBlockRd.terminator_get entry)) with
+               | TerminatorKindRd.Call call ->
+                   bare_place (FnCallDataRd.destination_get call) "_3" &&
+                   (match FnCallDataRd.args_get_list call with
+                    | [arg] -> (match OperandRd.get arg with
+                        | OperandRd.Move place -> bare_place place "_2"
+                        | _ -> false)
+                    | _ -> false) &&
+                   (match OptionRd.get (FnCallDataRd.target_get call) with
+                    | OptionRd.Something ptr ->
+                        Stdint.Uint32.to_string
+                          (BasicBlockIdRd.index_get (VfMirRd.of_pointer ptr)) = "1"
+                    | _ -> false) &&
+                   UnwindActionRd.get (FnCallDataRd.unwind_action_get call)
+                     = UnwindActionRd.Continue
+               | _ -> false) &&
+              BasicBlockRd.statements_get_list normal = [] &&
+              TerminatorKindRd.get
+                (TerminatorRd.kind_get (BasicBlockRd.terminator_get normal))
+                = TerminatorKindRd.Return
+          | _ -> false in
+        if not exact_glue_cfg then
+          Ast.static_error loc "Generated Drop glue MIR is not the admitted copy/call/return CFG" None;
+        let* bblocks =
+          Rocq_writer.rocq_print_big_record_field Args.rocq_writer "basic_blocks" @@ fun () ->
+          Rocq_writer.rocq_print_big_list Args.rocq_writer @@ fun () ->
+          ListAux.try_filter_map (fun block ->
+            translate_basic_block ret_place_decl.id block) bblocks_cpn in
+        let vf_bblocks = translate_basic_blocks_to_stmts (find_blocks bblocks) [] in
+        let ret_ty = Ast.ConstructedTypeExpr
+          (Ast.type_expr_loc ret_ty_info.vf_ty, "fn_outcome", [ret_ty_info.vf_ty]) in
+        let body = Ast.Func
+          (loc, Ast.Regular, glue_tparams, Some ret_ty, name, [(param_ty, "self")],
+           false, (None, None), (let (_, _, pre_post, _) = strong_contract in pre_post),
+           false,
+           Some (List.map (translate_to_vf_local_decl loc)
+                   (ret_place_decl :: other_decls) @ vf_bblocks,
+                 closing_cbrace_loc),
+           false, []) in
+        Ok (None, (split_name, body),
+            ({ id = loc; info = env_map } : VF0.debug_info_rust_fe))
     | DefKind.Fn ->
         let def_path = def_path_get body_cpn in
         let name = TrName.translate_def_path def_path in
@@ -9086,6 +9334,12 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
       in
       let traits_decls = List.flatten traits_decls in
       let bodies_cpn = VfMirRd.VfMir.bodies_get_list vf_mir_cpn in
+      List.iter (fun body ->
+        if VfMirRd.GeneratedGlue.enabled_get (BodyRd.generated_glue_get body) &&
+           BodyRd.DefKind.get (BodyRd.def_kind_get body) <> BodyRd.DefKind.Fn then
+          Ast.static_error Ast.DummyLoc
+            "Tagged generated Drop glue must be a function body" None)
+        bodies_cpn;
       let bodies_cpn =
         bodies_cpn
         |> List.filter (fun body_cpn ->
@@ -9097,6 +9351,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
         if Args.skip_specless_fns then
           List.filter
             (fun body_cpn ->
+              VfMirRd.GeneratedGlue.enabled_get (BodyRd.generated_glue_get body_cpn) ||
               not
                 (Capnp.Array.is_empty
                    (ContractRd.annotations_get (BodyRd.contract_get body_cpn))))
@@ -9120,8 +9375,85 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
           | _ -> None
           end
         | _ -> None) bodies_cpn in
+      let* generated_glue =
+        let generated_bodies = List.filter (fun body ->
+          VfMirRd.GeneratedGlue.enabled_get (BodyRd.generated_glue_get body))
+          bodies_cpn in
+        match generated_bodies with
+        | [] -> Ok None
+        | [generated_body] ->
+            let descriptor = BodyRd.generated_glue_get generated_body in
+            let module G = VfMirRd.GeneratedGlue in
+            let* loc = translate_span_data (BodyRd.span_get generated_body) in
+            let fail reason = Ast.static_error loc reason None in
+            let key = G.body_key_get descriptor in
+            if List.length (List.filter (fun body ->
+              TrName.translate_def_path (BodyRd.def_path_get body) = key)
+              bodies_cpn) <> 1 then
+              fail "Generated Drop glue key is missing or duplicated";
+            let guard = TrName.translate_def_path (G.guard_path_get descriptor) in
+            let selected_path = TrName.translate_def_path (G.selected_drop_path_get descriptor) in
+            let selected_hash = G.selected_drop_hash_get descriptor in
+            let resolved_args = G.resolved_args_get_list descriptor in
+            let instance_args = G.instance_args_get_list descriptor in
+            let concrete_arg = match instance_args with
+              | [arg] ->
+                  (match (D.decode_generic_arg arg).kind with
+                   | Type ty ->
+                       (match decode_ty ty with
+                        | `Adt (name, _, []) -> Some name
+                        | _ -> None)
+                   | _ -> None)
+              | _ -> None in
+            if key <> "__vf_generated_drop_glue" ||
+               TrName.translate_def_path (BodyRd.def_path_get generated_body) <> key ||
+               G.instance_kind_get descriptor <> "DropGlue" ||
+               G.glue_def_path_get descriptor = "" ||
+               G.glue_def_hash_get descriptor = "" ||
+               G.guard_hash_get descriptor = "" ||
+               selected_hash = "" ||
+               G.selected_source_hash_get descriptor = "" ||
+               canonicalize_item_name (G.raw_trait_path_get descriptor)
+                 <> "std::ops::Drop::drop" ||
+               G.raw_trait_hash_get descriptor = "" ||
+               G.raw_trait_args_get descriptor = "" ||
+               G.unwind_kind_get descriptor <> "Continue" ||
+               G.mir_phase_get descriptor <> "Runtime(Optimized)" ||
+               BodyRd.captured_mir_phase_get generated_body <> "Runtime(Optimized)" ||
+               BodyRd.captured_mir_hash_get generated_body = "" ||
+               G.selected_source_phase_get descriptor <> "Runtime(PostCleanup)" ||
+               Stdint.Uint32.to_string (G.normal_target_get descriptor) <> "1" ||
+               concrete_arg <> Some guard || resolved_args <> [] ||
+               not (List.mem (selected_path, selected_hash, guard) selected_drops) then
+              fail "Generated Drop glue descriptor is outside the admitted concrete instance";
+            let method_bodies = List.filter (fun body ->
+              BodyRd.is_drop_fn_get body &&
+              TrName.translate_def_path (BodyRd.def_path_get body) = selected_path &&
+              BodyRd.def_path_hash_get body = selected_hash &&
+              BodyRd.captured_mir_hash_get body = G.selected_source_hash_get descriptor &&
+              BodyRd.captured_mir_phase_get body = G.selected_source_phase_get descriptor)
+              bodies_cpn in
+            let method_body = match method_bodies with
+              | [method_body] -> method_body
+              | _ -> fail "Generated Drop glue needs exactly one matching checked source method" in
+            (match BodyRd.inputs_get_list method_body with
+             | [input] ->
+                 (match decode_ty (D.decode_ty input) with
+                  | `Ref (_, true, `Adt (name, _, [])) when name = guard -> ()
+                  | _ -> fail "Selected Drop method receiver is not the concrete mutable guard")
+             | _ -> fail "Selected Drop method receiver arity changed");
+            Ok (Some { glue_key = key; glue_guard = guard;
+                   glue_selected_path = selected_path;
+                   glue_selected_hash = selected_hash;
+                   glue_raw_trait_path = G.raw_trait_path_get descriptor;
+                   glue_raw_trait_hash = G.raw_trait_hash_get descriptor;
+                   glue_method_body = method_body })
+        | _ -> Ast.static_error Ast.DummyLoc
+            "Multiple generated Drop glue bodies in one exported unit" None
+      in
       let body_tr_defs_ctx =
-        { selected_drops; adt_defs; ghost_decl_map; directives = vf_mir_translator_directives; fn_specializer }
+        { selected_drops; generated_glue; adt_defs; ghost_decl_map;
+          directives = vf_mir_translator_directives; fn_specializer }
       in
       let* bodies_tr_res =
         Rocq_writer.rocq_print Args.rocq_writer "Definition bodies := ";

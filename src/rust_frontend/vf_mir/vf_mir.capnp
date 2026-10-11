@@ -778,6 +778,7 @@ struct TerminatorKind {
         selectedGuardPath @5: Text;
         isBareLocal @6: Bool;
         isReplace @7: Bool;
+        generatedBodyKey @8: Text;
     }
 
     struct AssertData {
@@ -803,6 +804,32 @@ struct TerminatorKind {
         falseEdge @12: Void;
         inlineAsm @13: Void;
     }
+}
+
+# Evidence for one concrete compiler-generated DropGlue instance.  The hashes
+# bind identities within one exported unit; paths identify the corresponding
+# definitions across the original and verified units.
+struct GeneratedGlue {
+    enabled @0: Bool;
+    bodyKey @1: Text;
+    guardPath @2: Text;
+    guardHash @3: Text;
+    glueDefPath @4: Text;
+    glueDefHash @5: Text;
+    instanceKind @6: Text;
+    instanceArgs @7: List(GenericArg);
+    selectedDropPath @8: Text;
+    selectedDropHash @9: Text;
+    resolvedArgs @10: List(GenericArg);
+    selectedSourcePhase @11: Text;
+    selectedSourceHash @12: Text;
+    rawTraitPath @13: Text;
+    rawTraitHash @14: Text;
+    rawTraitArgs @15: Text;
+    normalTarget @16: UInt32;
+    unwindKind @17: Text;
+    mirPhase @18: Text;
+    receiverType @19: Ty;
 }
 
 struct Terminator {
@@ -886,6 +913,9 @@ struct Body {
     isTraitFn @12: Bool;
     isDropFn @13: Bool; # Implements std::ops::Drop::drop
     defPathHash @26: Text;
+    generatedGlue @27: GeneratedGlue;
+    capturedMirHash @28: Text;
+    capturedMirPhase @29: Text;
     visibility @22: Visibility;
 }
 

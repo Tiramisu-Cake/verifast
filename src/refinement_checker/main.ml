@@ -81,6 +81,247 @@ let verified_bodies =
   |> List.map (fun body -> (canonicalize_def_path body.def_path, body))
   |> ensure_unique_keys
 
+let generated_glue_key = "__vf_generated_drop_glue"
+
+let require_generated condition message =
+  if not condition then error ("Generated DropGlue: " ^ message)
+
+let one_generated_body unit_name bodies =
+  let generated = List.filter (fun (_, body) -> body.generated_glue.enabled) bodies in
+  match generated with
+  | [] -> None
+  | [(_, body)] ->
+      require_generated (body.def_path = generated_glue_key &&
+                         body.generated_glue.body_key = generated_glue_key)
+        (unit_name ^ " has an unexpected generated body key");
+      require_generated
+        (List.length (List.filter (fun (_, b) ->
+           b.def_path = generated_glue_key) bodies) = 1)
+        (unit_name ^ " has a duplicate generated body key");
+      Some body
+  | _ -> error ("Generated DropGlue: " ^ unit_name ^ " has multiple tagged bodies")
+
+let generated_original = one_generated_body "original" original_bodies
+let generated_verified = one_generated_body "verified" verified_bodies
+
+let check_generated_unit unit_name bodies body =
+  let g = body.generated_glue in
+  let nonempty name value =
+    require_generated (value <> "") (unit_name ^ " has no " ^ name)
+  in
+  List.iter (fun (name, value) -> nonempty name value)
+    ["guard path", g.guard_path; "guard hash", g.guard_hash;
+     "glue path", g.glue_def_path; "glue hash", g.glue_def_hash;
+     "selected drop path", g.selected_drop_path;
+     "selected drop hash", g.selected_drop_hash;
+     "selected source hash", g.selected_source_hash;
+     "raw trait path", g.raw_trait_path;
+     "raw trait hash", g.raw_trait_hash;
+     "raw trait arguments", g.raw_trait_args];
+  require_generated (g.instance_kind = "DropGlue" && g.instance_args <> [] &&
+                     g.resolved_args = [] &&
+                     g.glue_def_path = "core::ptr::drop_glue" &&
+                     g.raw_trait_path = "core::ops::Drop::drop")
+    (unit_name ^ " has an unsupported instance");
+  require_generated (g.selected_source_phase = "Runtime(PostCleanup)" &&
+                     g.mir_phase = "Runtime(Optimized)" &&
+                     g.unwind_kind = "Continue" &&
+                     g.normal_target = Stdint.Uint32.of_int 1)
+    (unit_name ^ " has an unexpected MIR phase or control-flow edge");
+  require_generated (body.def_path_hash = g.glue_def_hash &&
+                     body.captured_mir_hash <> "" &&
+                     body.captured_mir_phase = g.mir_phase)
+    (unit_name ^ " generated body does not match its captured glue identity");
+  require_generated (body.def_kind = Fn && body.visibility = Restricted &&
+                     body.hir_generics.params = [] && body.generics = [] &&
+                     body.impl_block_generics = [] && body.clauses = [] &&
+                     body.impl_block_clauses = [] && body.ghost_stmts = [] &&
+                     body.ghost_decl_blocks = [] && body.loop_spec_blocks = [] &&
+                     body.var_debug_info = [] &&
+                     body.contract.annotations = [] &&
+                     not body.is_drop_fn && not body.is_trait_fn)
+    (unit_name ^ " generated body has unsupported declarations");
+  let selected = List.filter (fun (_, b) ->
+    b.is_drop_fn && b.def_path = g.selected_drop_path &&
+    b.def_path_hash = g.selected_drop_hash) bodies in
+  let selected = match selected with
+    | [(_, b)] -> b
+    | _ -> error ("Generated DropGlue: " ^ unit_name ^
+                  " must contain one checked selected Drop::drop body")
+  in
+  require_generated (selected.captured_mir_hash = g.selected_source_hash &&
+                     selected.captured_mir_phase = g.selected_source_phase)
+    (unit_name ^ " selected method does not match captured MIR");
+  let drops = bodies |> List.concat_map (fun (_, b) ->
+    b.basic_blocks |> List.filter_map (fun bb ->
+      match bb.terminator.kind with
+      | Drop d when d.generated_body_key <> "" -> Some (b, bb.is_cleanup, d)
+      | _ -> None)) in
+  let normal_drops = List.filter (fun (_, is_cleanup, _) -> not is_cleanup) drops in
+  begin match normal_drops with
+  | [(caller, _, _)] ->
+      require_generated (List.for_all (fun (b, _, _) -> b.def_path = caller.def_path) drops)
+        (unit_name ^ " tagged Drops occur in different callers");
+      List.iter (fun (_, _, d) ->
+      require_generated (d.generated_body_key = g.body_key &&
+                         d.selected_drop_path = g.selected_drop_path &&
+                         d.selected_drop_hash = g.selected_drop_hash &&
+                         d.selected_guard_path = g.guard_path &&
+                         d.is_bare_local && not d.is_replace &&
+                         d.place.projection = [])
+        (unit_name ^ " caller Drop does not bind the generated body");
+      let guard_locals = List.filter (fun local ->
+        local.id = d.place.local &&
+        local.ty.kind = (match g.receiver_type.kind with
+          | Ref {ty; _} -> ty.kind
+          | _ -> Tuple [])) caller.local_decls in
+      require_generated (List.length guard_locals = 1)
+        (unit_name ^ " caller Drop place has the wrong guard type")) drops
+  | _ -> error ("Generated DropGlue: " ^ unit_name ^
+                " must contain exactly one normal tagged caller Drop")
+  end
+
+let check_generated_layout unit_name vf_mir body =
+  let rec ind_list_to_list = function
+    | Nil -> []
+    | Cons {h; t} -> h :: ind_list_to_list t
+  in
+  let g = body.generated_glue in
+  require_generated (vf_mir.target_triple = "x86_64-unknown-linux-gnu" &&
+                     vf_mir.pointer_width = 64)
+    (unit_name ^ " has the wrong target");
+  let guards = List.filter (fun adt ->
+    adt.id.name = g.guard_path && adt.is_local &&
+    adt.has_concrete_guard_layout &&
+    adt.concrete_guard_def_path = g.guard_path &&
+    adt.concrete_guard_def_path_hash = g.guard_hash)
+    (ind_list_to_list vf_mir.adt_defs) in
+  match guards with
+  | [adt] ->
+      let u64: Vf_mir_decoder.ty = {kind=UInt U64} in
+      begin match adt.variants with
+      | [variant] ->
+          begin match variant.fields with
+          | [src; dst; len] ->
+              require_generated
+                (src.name.name = "src" && dst.name.name = "dst" &&
+                 len.name.name = "len" &&
+                 src.ty.kind = RawPtr {mutability=Not; ty=u64} &&
+                 dst.ty.kind = RawPtr {mutability=Mut; ty=u64} &&
+                 len.ty.kind = UInt USize &&
+                 adt.concrete_guard_size_bytes = Stdint.Uint64.of_int 24 &&
+                 adt.concrete_guard_align_bytes = Stdint.Uint64.of_int 8 &&
+                 adt.concrete_guard_field_offsets = ["0"; "8"; "16"] &&
+                 adt.concrete_guard_field_sizes = ["8"; "8"; "8"])
+                (unit_name ^ " has a different concrete guard layout")
+          | _ -> error ("Generated DropGlue: " ^ unit_name ^ " guard has wrong fields")
+          end
+      | _ -> error ("Generated DropGlue: " ^ unit_name ^ " guard has wrong variants")
+      end
+  | _ -> error ("Generated DropGlue: " ^ unit_name ^
+                " must contain one matching local concrete guard")
+
+let check_generated_shape unit_name body =
+  let g = body.generated_glue in
+  let bad detail = error ("Generated DropGlue: " ^ unit_name ^ " " ^ detail) in
+  let local name (p: Vf_mir_decoder.place) =
+    p.local.name = name && p.projection = [] && p.kind = Other in
+  let unit_ty (ty: Vf_mir_decoder.ty) = ty.kind = Tuple [] in
+  begin match body.inputs, body.local_decls with
+  | [input], [r; self; copied; result] ->
+      if input <> g.receiver_type || not (unit_ty body.output) ||
+         not (unit_ty r.ty && unit_ty result.ty) ||
+         self.ty <> input || copied.ty <> input ||
+         r.id.name <> "_0" || self.id.name <> "_1" ||
+         copied.id.name <> "_2" || result.id.name <> "_3" ||
+         List.map (fun local -> local.mutability) body.local_decls <>
+           [Mut; Not; Mut; Mut] then
+        bad "has a different signature or local layout";
+      begin match input.kind with
+      | Ref {mutability=Mut; ty={kind=Adt guard}; _}
+          when guard.id.name = g.guard_path && guard.substs = [] &&
+               g.instance_args = [{kind=Type {kind=Adt guard}}] -> ()
+      | _ -> bad "receiver is not &mut of the selected guard"
+      end
+  | _ -> bad "must have exactly one input and four locals"
+  end;
+  begin match body.basic_blocks with
+  | [bb0; bb1] when bb0.id.index = Stdint.Uint32.of_int 0 &&
+                     bb1.id.index = Stdint.Uint32.of_int 1 &&
+                     not bb0.is_cleanup && not bb1.is_cleanup ->
+      begin match bb0.statements with
+      | [{kind=Assign {lhs_place; rhs_rvalue=Use (Copy source)}; _}]
+          when local "_2" lhs_place && local "_1" source -> ()
+      | _ -> bad "bb0 must contain only _2 = copy _1"
+      end;
+      begin match bb0.terminator.kind with
+      | Call call ->
+          begin match call.func with
+          | Constant {const=Val {const_value=ZeroSized;
+                                 ty={kind=FnDef fn}}; _}
+              when fn.id.name = g.raw_trait_path &&
+                   fn.substs = g.instance_args &&
+                   fn.late_bound_generic_param_count = 1 -> ()
+          | _ -> bad "call is not the recorded raw trait FnDef"
+          end;
+          begin match call.args, call.target, call.unwind_action with
+          | [Move arg], Something target, Continue
+              when local "_2" arg && local "_3" call.destination &&
+                   target.index = g.normal_target &&
+                   call.ghost_generic_arg_list = Nothing -> ()
+          | _ -> bad "call operands, destination, target, or unwind differ"
+          end
+      | _ -> bad "bb0 must end in the recorded trait call"
+      end;
+      require_generated (bb1.statements = [] && bb1.terminator.kind = Return)
+        (unit_name ^ " bb1 must contain only Return")
+  | _ -> bad "must have exactly the observed two-block CFG"
+  end
+
+let check_generated_pair body0 body1 =
+  check_generated_unit "original" original_bodies body0;
+  check_generated_unit "verified" verified_bodies body1;
+  check_generated_layout "original" original_vf_mir body0;
+  check_generated_layout "verified" verified_vf_mir body1;
+  check_generated_shape "original" body0;
+  check_generated_shape "verified" body1;
+  let g0, g1 = body0.generated_glue, body1.generated_glue in
+  require_generated
+    (g0.body_key = g1.body_key && g0.guard_path = g1.guard_path &&
+     g0.glue_def_path = g1.glue_def_path &&
+     g0.instance_kind = g1.instance_kind &&
+     g0.instance_args = g1.instance_args &&
+     g0.selected_drop_path = g1.selected_drop_path &&
+     g0.resolved_args = g1.resolved_args &&
+     g0.selected_source_phase = g1.selected_source_phase &&
+     g0.raw_trait_path = g1.raw_trait_path &&
+     g0.raw_trait_args = g1.raw_trait_args &&
+     g0.normal_target = g1.normal_target &&
+     g0.unwind_kind = g1.unwind_kind && g0.mir_phase = g1.mir_phase &&
+     g0.receiver_type = g1.receiver_type)
+    "original and verified descriptors differ";
+  let without_spans (b: body) =
+    let local_decls = List.map (fun d ->
+      {d with source_info={span=Dummy}}) b.local_decls in
+    let basic_blocks = List.map (fun bb ->
+      let statements = List.map (fun s ->
+        {s with source_info={span=Dummy}}) bb.statements in
+      let kind = match bb.terminator.kind with
+        | Call call ->
+            let func = match call.func with
+              | Constant c -> Constant {c with span=Dummy}
+              | operand -> operand
+            in
+            Call {call with func; call_span=Dummy}
+        | kind -> kind
+      in
+      let terminator = {bb.terminator with source_info={span=Dummy}; kind} in
+      {bb with statements; terminator}) b.basic_blocks in
+    local_decls, basic_blocks
+  in
+  require_generated (without_spans body0 = without_spans body1)
+    "original and verified MIR differ outside source spans"
+
 let get_line_offsets text =
   let rec get_line_offsets' text offset acc =
     match String.index_from_opt text offset '\n' with
@@ -136,7 +377,12 @@ let original_checked_spans = ref []
 let verified_checked_spans = ref wrapper_fn_spans
 
 let check_body_refines_body def_path body verified_body =
-  if bodies_are_identical def_path body verified_body then begin
+  if body.generated_glue.enabled || verified_body.generated_glue.enabled then begin
+    require_generated (body.generated_glue.enabled && verified_body.generated_glue.enabled)
+      "tag is present on only one side";
+    check_generated_pair body verified_body;
+    check_body_refines_body original_bodies verified_bodies def_path body verified_body
+  end else if bodies_are_identical def_path body verified_body then begin
     if !verbosity >= verbosity_body then
       Printf.printf "Function bodies for %s are identical\n" def_path
   end else (
@@ -284,11 +530,26 @@ let rec check_module module0 module1 =
   List.iter2 check_module submodules0 submodules1
 
 let check_bodies () =
+  let has_generated_drop bodies =
+    List.exists (fun (_, body) ->
+      List.exists (fun bb -> match bb.terminator.kind with
+        | Drop d -> d.generated_body_key <> ""
+        | _ -> false) body.basic_blocks) bodies
+  in
+  begin match generated_original, generated_verified with
+  | None, None ->
+      require_generated
+        (not (has_generated_drop original_bodies) &&
+         not (has_generated_drop verified_bodies))
+        "a tagged caller Drop has no generated body"
+  | Some _, Some _ -> ()
+  | _ -> error "Generated DropGlue: body missing from one exported unit"
+  end;
   original_bodies
   |> List.iter @@ fun (def_path, body) ->
      match List.assoc_opt def_path verified_bodies with
      | None ->
-        if body.visibility = Restricted then
+        if body.visibility = Restricted && not body.generated_glue.enabled then
           () (* If a private function of the original program does not appear in the verified program,
                 it must be the case that all calls of that function were inlined. *)
         else

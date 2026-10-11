@@ -412,6 +412,16 @@ let update_env x v env = (x, v) :: List.remove_assoc x env
 
 let local_name (locals: local_decl array) i = locals.(i).id.name
 
+let empty_generated_glue: generated_glue = {
+  enabled=false; body_key=""; guard_path=""; guard_hash="";
+  glue_def_path=""; glue_def_hash=""; instance_kind="";
+  instance_args=[]; selected_drop_path=""; selected_drop_hash="";
+  resolved_args=[]; selected_source_phase=""; selected_source_hash="";
+  raw_trait_path=""; raw_trait_hash=""; raw_trait_args="";
+  normal_target=Stdint.Uint32.of_int 0; unwind_kind=""; mir_phase="";
+  receiver_type={kind=Tuple []}
+}
+
 let fns_to_be_inlined: (string * body) list =
   let local x = {local={name=x}; projection=[]; local_is_mutable=false; kind=Other} in
  [
@@ -619,6 +629,10 @@ let fns_to_be_inlined: (string * body) list =
       clauses=[];
       is_trait_fn=false;
       is_drop_fn=false;
+      def_path_hash="";
+      generated_glue=empty_generated_glue;
+      captured_mir_hash="";
+      captured_mir_phase="";
       visibility=Public;
     }
   );
@@ -716,6 +730,10 @@ let fns_to_be_inlined: (string * body) list =
     clauses=[];
     is_trait_fn=false;
     is_drop_fn=false;
+      def_path_hash="";
+      generated_glue=empty_generated_glue;
+      captured_mir_hash="";
+      captured_mir_phase="";
     visibility=Public;
   }
   );
@@ -955,6 +973,10 @@ let fns_to_be_inlined: (string * body) list =
     clauses=[];
     is_trait_fn=false;
     is_drop_fn=false;
+      def_path_hash="";
+      generated_glue=empty_generated_glue;
+      captured_mir_hash="";
+      captured_mir_phase="";
     visibility=Public;
   });
   ("std::result::Result::<T, E>::map_err",
@@ -1193,6 +1215,10 @@ let fns_to_be_inlined: (string * body) list =
     clauses=[];
     is_trait_fn=false;
     is_drop_fn=false;
+      def_path_hash="";
+      generated_glue=empty_generated_glue;
+      captured_mir_hash="";
+      captured_mir_phase="";
     visibility=Public;
   });
   ("std::option::Option::<T>::map",
@@ -1409,6 +1435,10 @@ let fns_to_be_inlined: (string * body) list =
     clauses=[];
     is_trait_fn=false;
     is_drop_fn=false;
+      def_path_hash="";
+      generated_glue=empty_generated_glue;
+      captured_mir_hash="";
+      captured_mir_phase="";
     visibility=Public;
   });
   "std::option::Option::<T>::unwrap_or_else",
@@ -1589,6 +1619,10 @@ let fns_to_be_inlined: (string * body) list =
     clauses=[];
     is_trait_fn=false;
     is_drop_fn=false;
+      def_path_hash="";
+      generated_glue=empty_generated_glue;
+      captured_mir_hash="";
+      captured_mir_phase="";
     visibility=Public;
   }
 ]

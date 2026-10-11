@@ -634,6 +634,7 @@ use rustc_span::RemapPathScopeComponents;
         mode: EncKind<'tcx, 'a>,
         annots: LinkedList<Box<GhostRange>>,
         mut_annots: Vec<rustc_span::BytePos>,
+        generated_raw_callee: Option<rustc_hir::def_id::DefId>,
     }
 
     impl<'tcx, 'a> EncCtx<'tcx, 'a> {
@@ -649,6 +650,7 @@ use rustc_span::RemapPathScopeComponents;
                 mode,
                 annots,
                 mut_annots,
+                generated_raw_callee: None,
             }
         }
         pub fn add_req_adt(&mut self, adt: ty::AdtDef<'tcx>) {
@@ -666,6 +668,19 @@ use rustc_span::RemapPathScopeComponents;
                 _ => bug!(),
             }
         }
+    }
+
+    // Actual immutable compiler body, not a hand-written MIR helper.
+    struct GeneratedGlue<'tcx> {
+        body: &'tcx mir::Body<'tcx>,
+        drop_ty: ty::Ty<'tcx>,
+        guard: ty::AdtDef<'tcx>,
+        instance: ty::Instance<'tcx>,
+        selected: ty::Instance<'tcx>,
+        raw_callee: rustc_hir::def_id::DefId,
+        raw_args: String,
+        source_hash: String,
+        source_phase: String,
     }
 
     pub struct VfMirCapnpBuilder<'tcx> {
@@ -908,6 +923,145 @@ use rustc_span::RemapPathScopeComponents;
                 .unwrap_or_else(|error| panic!("cannot write glue observation {path:?}: {error}"));
         }
 
+        fn captured_mir_hash(body: &mir::Body<'tcx>) -> String {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            format!("{body:#?}").hash(&mut hasher);
+            format!("{:016x}", hasher.finish())
+        }
+
+        // Collect from already-owned source MIR. Never ask rustc for selected
+        // method MIR after the collector has stolen it.
+        fn collect_generated_glue(&self) -> Vec<GeneratedGlue<'tcx>> {
+            if std::env::var_os("SMALLSORT_ACTUAL_GLUE_BODY").is_none() {
+                return Vec::new();
+            }
+            let tcx = self.tcx;
+            let mut result: Vec<GeneratedGlue<'tcx>> = Vec::new();
+            for (owner, _) in &self.bodies {
+                for block in owner.basic_blocks.iter() {
+                    let mir::TerminatorKind::Drop { place, replace, .. } = &block.terminator().kind else { continue };
+                    let drop_ty = place.ty(&owner.local_decls, tcx).ty;
+                    let ty::TyKind::Adt(guard, guard_args) = drop_ty.kind() else { continue };
+                    if !guard.did().is_local() || !guard_args.is_empty() { continue }
+                    let Some(destructor) = guard.destructor(tcx) else { continue };
+                    // Other local types must retain ordinary Drop semantics.
+                    if tcx.def_path_str(guard.did()) != "CopyOnDrop" { continue }
+                    assert!(place.projection.is_empty() && !replace, "generated glue needs bare local non-replacement Drop");
+                    if result.iter().any(|g| g.drop_ty == drop_ty) { continue }
+                    assert!(result.is_empty(), "only one concrete generated glue admitted per unit");
+                    assert_eq!(guard.all_fields().count(), 3, "exact guard fields");
+                    for (i, field) in guard.all_fields().enumerate() {
+                        let ty = tcx.type_of(field.did).instantiate_identity().skip_normalization();
+                        match (i, ty.kind()) {
+                            (0, ty::TyKind::RawPtr(t, mir::Mutability::Not)) | (1, ty::TyKind::RawPtr(t, mir::Mutability::Mut)) => assert_eq!(*t, tcx.types.u64),
+                            (2, ty::TyKind::Uint(ty::UintTy::Usize)) => (),
+                            _ => panic!("generated glue exact concrete-u64 guard fields refused"),
+                        }
+                    }
+                    let instance = ty::Instance::resolve_drop_glue(tcx, drop_ty);
+                    assert_eq!(instance.args.len(), 1);
+                    assert!(matches!(instance.args[0].kind(), ty::GenericArgKind::Type(t) if t == drop_ty));
+                    let body = tcx.instance_mir(instance.def);
+                    assert_eq!(body.source.instance, instance.def);
+                    assert!(format!("{:?}", instance.def).starts_with("Shim(DropGlue("));
+                    let locals = body.local_decls.iter_enumerated().map(|(id, _)| id).collect::<Vec<_>>();
+                    let blocks = body.basic_blocks.iter_enumerated().map(|(id, _)| id).collect::<Vec<_>>();
+                    assert_eq!(format!("{:?}", body.phase), "Runtime(Optimized)");
+                    assert_eq!(body.arg_count, 1);
+                    assert_eq!(body.local_decls.len(), 4);
+                    assert_eq!(body.local_decls[locals[0]].ty, tcx.types.unit);
+                    assert_eq!(body.local_decls[locals[3]].ty, tcx.types.unit);
+                    for i in [1, 2] {
+                        assert!(matches!(body.local_decls[locals[i]].ty.kind(), ty::TyKind::Ref(_, t, mir::Mutability::Mut) if *t == drop_ty));
+                    }
+                    assert_eq!(body.basic_blocks.len(), 2);
+                    let entry = &body.basic_blocks[blocks[0]];
+                    let exit = &body.basic_blocks[blocks[1]];
+                    assert!(!entry.is_cleanup && !exit.is_cleanup && exit.statements.is_empty());
+                    assert!(matches!(exit.terminator().kind, mir::TerminatorKind::Return));
+                    assert_eq!(entry.statements.len(), 1);
+                    assert!(matches!(&entry.statements[0].kind, mir::StatementKind::Assign(a)
+                        if a.0 == mir::Place::from(locals[2]) && matches!(&a.1, mir::Rvalue::Use(mir::Operand::Copy(p)) if *p == mir::Place::from(locals[1]))));
+                    let mir::TerminatorKind::Call { func, args, destination, target, unwind, .. } = &entry.terminator().kind else { panic!("actual generated glue entry not call") };
+                    assert_eq!(*target, Some(blocks[1]));
+                    assert!(matches!(unwind, mir::UnwindAction::Continue));
+                    assert_eq!(*destination, mir::Place::from(locals[3]));
+                    assert_eq!(args.len(), 1);
+                    assert!(matches!(&args[0].node, mir::Operand::Move(p) if *p == mir::Place::from(locals[2])));
+                    let callee_ty = func.ty(&body.local_decls, tcx);
+                    let ty::TyKind::FnDef(raw_callee, raw_args) = callee_ty.kind() else { panic!("glue callee not FnDef") };
+                    let selected = ty::Instance::try_resolve(tcx, ty::TypingEnv::fully_monomorphized(), *raw_callee,
+                        tcx.instantiate_bound_regions_with_erased(*raw_args)).expect("glue callee resolution").expect("unresolved glue callee");
+                    let expected = ty::Instance { def: ty::InstanceKind::Item(destructor.did), args: *guard_args };
+                    assert_eq!(selected, expected, "whole destructor Instance equality required");
+                    let captures = self.bodies.iter().filter(|(b, _)| b.source.def_id() == selected.def_id()).collect::<Vec<_>>();
+                    assert_eq!(captures.len(), 1, "unique captured actual method");
+                    let source = &captures[0].0;
+                    result.push(GeneratedGlue { body, drop_ty, guard: *guard, instance, selected, raw_callee: *raw_callee,
+                        raw_args: format!("{raw_args:?}"), source_hash: Self::captured_mir_hash(source), source_phase: format!("{:?}", source.phase) });
+                }
+            }
+            result
+        }
+
+        fn encode_generated_body(&self, g: &GeneratedGlue<'tcx>, mut output: body_cpn::Builder<'_>) {
+            let tcx = self.tcx;
+            let body = g.body;
+            let locals = body.local_decls.iter_enumerated().map(|(id, _)| id).collect::<Vec<_>>();
+            let mut ctx = EncCtx::new(tcx, EncKind::Body(body), LinkedList::new(), Vec::new());
+            ctx.generated_raw_callee = Some(g.raw_callee);
+            output.set_def_path("__vf_generated_drop_glue");
+            output.set_def_path_hash(&format!("{:?}", tcx.def_path_hash(g.instance.def_id())));
+            output.reborrow().init_def_kind().set_fn(());
+            output.reborrow().init_visibility().set_restricted(());
+            output.reborrow().init_unsafety().set_unsafe(());
+            output.set_captured_mir_hash(&Self::captured_mir_hash(body));
+            output.set_captured_mir_phase(&format!("{:?}", body.phase));
+            for field in [0, 1, 2] {
+                let span = match field {
+                    0 => output.reborrow().init_fn_sig_span(),
+                    1 => output.reborrow().init_span(),
+                    _ => output.reborrow().init_imp_span(),
+                };
+                Self::encode_span_data(tcx, &body.span.data(), span);
+            }
+            let mut contract = output.reborrow().init_contract();
+            Self::encode_span_data(tcx, &body.span.data(), contract.reborrow().init_span());
+            contract.init_annotations(0);
+            let mut gens = output.reborrow().init_hir_generics();
+            Self::encode_span_data(tcx, &body.span.data(), gens.reborrow().init_span());
+            gens.init_params(0);
+            output.reborrow().init_impl_block_hir_generics().set_nothing(());
+            Self::encode_ty(tcx, &mut ctx, body.local_decls[locals[0]].ty, output.reborrow().init_output());
+            let mut inputs = output.reborrow().init_inputs(1);
+            Self::encode_ty(tcx, &mut ctx, body.local_decls[locals[1]].ty, inputs.reborrow().get(0));
+            output.reborrow().fill_local_decls(body.local_decls.iter_enumerated(), |out, (id, decl)| Self::encode_local_decl(tcx, &mut ctx, id, decl, out));
+            output.reborrow().fill_basic_blocks(body.basic_blocks.iter_enumerated(), |out, (id, block)| Self::encode_basic_block(tcx, &mut ctx, id, block, out, &self.bodies));
+            let mut d = output.init_generated_glue();
+            d.set_enabled(true);
+            d.set_body_key("__vf_generated_drop_glue");
+            d.set_guard_path(&tcx.def_path_str(g.guard.did()));
+            d.set_guard_hash(&format!("{:?}", tcx.def_path_hash(g.guard.did())));
+            d.set_glue_def_path(&tcx.def_path_str(g.instance.def_id()));
+            d.set_glue_def_hash(&format!("{:?}", tcx.def_path_hash(g.instance.def_id())));
+            d.set_instance_kind("DropGlue");
+            let mut args = d.reborrow().init_instance_args(g.instance.args.len() as u32);
+            for (i, arg) in g.instance.args.iter().enumerate() { Self::encode_gen_arg(tcx, &mut ctx, arg, args.reborrow().get(i as u32)); }
+            d.set_selected_drop_path(&tcx.def_path_str(g.selected.def_id()));
+            d.set_selected_drop_hash(&format!("{:?}", tcx.def_path_hash(g.selected.def_id())));
+            d.reborrow().init_resolved_args(0);
+            d.set_selected_source_phase(&g.source_phase);
+            d.set_selected_source_hash(&g.source_hash);
+            d.set_raw_trait_path(&tcx.def_path_str(g.raw_callee));
+            d.set_raw_trait_hash(&format!("{:?}", tcx.def_path_hash(g.raw_callee)));
+            d.set_raw_trait_args(&g.raw_args);
+            d.set_normal_target(1);
+            d.set_unwind_kind("Continue");
+            d.set_mir_phase(&format!("{:?}", body.phase));
+            Self::encode_ty(tcx, &mut ctx, body.local_decls[locals[1]].ty, d.init_receiver_type());
+        }
+
         fn encode_trait_impls(&mut self, vf_mir_cpn: &mut vf_mir_cpn::Builder<'_>) {
             let mut enc_ctx = EncCtx::new(self.tcx, EncKind::Other, LinkedList::new(), Vec::new());
             vf_mir_cpn.fill_trait_impls(&self.trait_impls, |mut trait_impl_cpn, trait_impl| {
@@ -1106,7 +1260,10 @@ use rustc_span::RemapPathScopeComponents;
             // Encode traits (consumes annotations)
             self.encode_traits(&mut req_adt_defs, vf_mir_cpn.reborrow());
 
-            vf_mir_cpn.fill_bodies(&self.bodies, |mut body_cpn, (body, span)| {
+            let generated = self.collect_generated_glue();
+            let mut body_outputs = vf_mir_cpn.reborrow().init_bodies((self.bodies.len() + generated.len()) as u32);
+            for (index, (body, span)) in self.bodies.iter().enumerate() {
+                let mut body_cpn = body_outputs.reborrow().get(index as u32);
                 Self::encode_span_data(
                     self.tcx,
                     &span.data(),
@@ -1133,7 +1290,10 @@ use rustc_span::RemapPathScopeComponents;
                 let mut enc_ctx = EncCtx::new(self.tcx, EncKind::Body(body), annots, mut_annots);
                 Self::encode_body(&mut enc_ctx, body_cpn, &self.bodies);
                 req_adt_defs.extend(enc_ctx.get_req_adts());
-            });
+            }
+            for (index, glue) in generated.iter().enumerate() {
+                self.encode_generated_body(glue, body_outputs.reborrow().get((self.bodies.len() + index) as u32));
+            }
 
             // Encode directives
             vf_mir_cpn.fill_directives(&self.directives, |directive_cpn, directive| {
@@ -1543,6 +1703,8 @@ use rustc_span::RemapPathScopeComponents;
             );
 
             let def_id = body.source.def_id();
+            body_cpn.set_captured_mir_hash(&Self::captured_mir_hash(body));
+            body_cpn.set_captured_mir_phase(&format!("{:?}", body.phase));
 
             let kind = tcx.def_kind(def_id);
             let is_closure = match kind {
@@ -2116,7 +2278,9 @@ use rustc_span::RemapPathScopeComponents;
                 }
                 ty::TyKind::FnDef(def_id, substs) => {
                     let fn_def_ty_cpn = ty_kind_cpn.init_fn_def();
-                    let substs = substs.no_bound_vars().expect("FnDef args with bound vars");
+                    let substs = if enc_ctx.generated_raw_callee == Some(*def_id) {
+                        tcx.instantiate_bound_regions_with_erased(*substs)
+                    } else { substs.no_bound_vars().expect("FnDef args with bound vars") };
                     Self::encode_ty_fn_def(tcx, enc_ctx, def_id, substs, fn_def_ty_cpn);
                 }
                 ty::TyKind::FnPtr(binder, header) => {
@@ -2824,6 +2988,9 @@ use rustc_span::RemapPathScopeComponents;
                             if let Some(destructor) = adt.destructor(tcx) {
                                 let did = destructor.did;
                                 if did.is_local() {
+                                    if std::env::var_os("SMALLSORT_ACTUAL_GLUE_BODY").is_some() && tcx.def_path_str(adt.did()) == "CopyOnDrop" {
+                                        drop_data_cpn.set_generated_body_key("__vf_generated_drop_glue");
+                                    }
                                     drop_data_cpn.set_selected_guard_path(&tcx.def_path_str(adt.did()));
                                     drop_data_cpn.set_selected_drop_path(&tcx.def_path_str(did));
                                     drop_data_cpn.set_selected_drop_hash(&format!("{:?}", tcx.def_path_hash(did)));
