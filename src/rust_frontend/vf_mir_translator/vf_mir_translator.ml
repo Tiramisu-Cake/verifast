@@ -1963,6 +1963,8 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
       let callback_call_loc = ref None
       let fnmut_call_count = ref 0
       let callback_unwind_label = "#merge_callback_unwind_epilogue"
+      let selected_resume_targets : string list ref = ref []
+      let translating_selected_resume = ref false
       let hrtb_fnmut_output_bounds : (string * string) list ref = ref []
       let pending_hrtb_projection_eq : Ast.stmt list ref = ref []
 
@@ -3199,10 +3201,13 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
               Mir.EncodedTerminator,
               target :: fail_targets )
       | UnwindResume ->
+          (* Resume has no source statement. Preserve its MIR edge and expression;
+             direct qualified Drop cleanup uses the existing synthetic location. *)
+          let stmt_loc = if !State.translating_selected_resume then Ast.DummyLoc else loc in
           Ok
             ( [
                 Ast.ReturnStmt
-                  ( loc,
+                  ( stmt_loc,
                     Some (Ast.CallExpr (loc, "unwinding", [], [], [], Static))
                   );
               ],
@@ -3902,7 +3907,10 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
         let terminator_cpn = terminator_get bblock_cpn in
         let* terminator_stmts, terminator, successors =
           Rocq_writer.rocq_print_big_record_field TranslatorArgs.rocq_writer "terminator" @@ fun () ->
-            translate_terminator ret_place_id terminator_cpn
+            State.translating_selected_resume := List.mem id !State.selected_resume_targets;
+            let result = translate_terminator ret_place_id terminator_cpn in
+            State.translating_selected_resume := false;
+            result
         in
         let bblock : Mir.basic_block =
           {
@@ -6116,6 +6124,24 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
               List.map (translate_to_vf_local_decl loc) (ret_place_decl :: local_decls)
             in
             let bblocks_cpn = basic_blocks_get_list body_cpn in
+            State.selected_resume_targets := List.filter_map (fun block ->
+              match TerminatorKindRd.get (TerminatorRd.kind_get (BasicBlockRd.terminator_get block)) with
+              | TerminatorKindRd.Drop data when List.mem
+                  (TrName.translate_def_path (DropData.selected_drop_path_get data),
+                   DropData.selected_drop_hash_get data,
+                   TrName.translate_def_path (DropData.selected_guard_path_get data))
+                  Args.body_tr_defs_ctx.selected_drops ->
+                  (match UnwindActionRd.get (DropData.unwind_action_get data) with
+                   | UnwindActionRd.Cleanup target ->
+                       let id = translate_basic_block_id target in
+                       (match List.find_opt (fun block ->
+                          translate_basic_block_id (BasicBlockRd.id_get block) = id) bblocks_cpn with
+                        | Some resume when BasicBlockRd.is_cleanup_get resume &&
+                            BasicBlockRd.statements_get_list resume = [] &&
+                            TerminatorKindRd.get (TerminatorRd.kind_get (BasicBlockRd.terminator_get resume)) = TerminatorKindRd.UnwindResume -> Some id
+                        | _ -> None)
+                   | _ -> None)
+              | _ -> None) bblocks_cpn;
             let* bblocks =
               Rocq_writer.rocq_print_big_record_field Args.rocq_writer "basic_blocks" @@ fun () ->
                 Rocq_writer.rocq_print_big_list Args.rocq_writer @@ fun () ->
