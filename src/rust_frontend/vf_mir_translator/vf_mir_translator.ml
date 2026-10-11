@@ -3192,6 +3192,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
               | Some "duplicate_end", Some _ ->
                   [ghost "close_points_to" [receiver]; ghost "end_ref_mut" [receiver];
                    ghost "end_ref_mut" [receiver]; ghost "open_points_to" [address]]
+              | Some "post_retirement_drop", _ -> finish
               | Some _, _ -> Ast.static_error loc "Unsupported generated Drop receiver diagnostic" None
             in
             let unwind_stmts, unwind_targets = translate_unwind_action (unwind_action_get drop_data_cpn) loc in
@@ -6416,6 +6417,78 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
             let toplevel_blocks = find_blocks bblocks in
             let vf_bblocks =
               translate_basic_blocks_to_stmts toplevel_blocks []
+            in
+            (* This deliberately invalid generated call is a separately
+               profiled control. Select its local and receiver from the MIR
+               Drop edge, then place it immediately after that local's real
+               Rust StorageDead. The generated receiver declaration and the
+               ordinary Drop finish remain untouched. *)
+            let vf_bblocks =
+              match Sys.getenv_opt "SMALLSORT_DROP_RECEIVER_CONTROL",
+                    body_tr_defs_ctx.generated_glue with
+              | Some "post_retirement_drop", Some binding ->
+                  let qualified_drops = List.filter_map (fun block ->
+                    match TerminatorKindRd.get
+                      (TerminatorRd.kind_get
+                        (BasicBlockRd.terminator_get block)) with
+                    | TerminatorKindRd.Drop data
+                      when not (BasicBlockRd.is_cleanup_get block) &&
+                           TerminatorKindRd.DropData.generated_body_key_get data = binding.glue_key &&
+                           TrName.translate_def_path
+                             (TerminatorKindRd.DropData.selected_drop_path_get data) =
+                               binding.glue_selected_path &&
+                           TerminatorKindRd.DropData.selected_drop_hash_get data =
+                               binding.glue_selected_hash &&
+                           TrName.translate_def_path
+                             (TerminatorKindRd.DropData.selected_guard_path_get data) =
+                               binding.glue_guard &&
+                           List.mem
+                             (TrName.translate_def_path
+                                (TerminatorKindRd.DropData.selected_drop_path_get data),
+                              TerminatorKindRd.DropData.selected_drop_hash_get data,
+                              TrName.translate_def_path
+                                (TerminatorKindRd.DropData.selected_guard_path_get data))
+                             body_tr_defs_ctx.selected_drops &&
+                           TerminatorKindRd.DropData.is_bare_local_get data &&
+                           not (TerminatorKindRd.DropData.is_replace_get data) ->
+                        let place = TerminatorKindRd.DropData.place_get data in
+                        let mir_local_id =
+                          LocalDeclIdRd.name_get (PlaceRd.local_get place) in
+                        let target = translate_basic_block_id
+                          (TerminatorKindRd.DropData.target_get data) in
+                        Some (mir_local_id, "__vf_drop_receiver_" ^ target)
+                    | _ -> None) bblocks_cpn in
+                  (match qualified_drops with
+                   | [] -> vf_bblocks
+                   | [(mir_local_id, receiver_name)] ->
+                       let injected at =
+                         Ast.ExprStmt (Ast.CallExpr
+                           (at, binding.glue_key,
+                            [Ast.InferredTypeExpr at], [],
+                            [Ast.LitPat (Ast.Var (at, receiver_name))], Ast.Static))
+                       in
+                       let found = ref 0 in
+                       let rec insert_stmt stmt =
+                         match stmt with
+                         | Ast.RustStorageDeadStmt (at, mir_at, id, local)
+                           when id = mir_local_id ->
+                             incr found;
+                             [stmt; injected at]
+                         | Ast.BlockStmt (at, decls, stmts, close, addresses) ->
+                             [Ast.BlockStmt
+                               (at, decls, List.concat_map insert_stmt stmts,
+                                close, addresses)]
+                         | stmt -> [stmt]
+                       in
+                       let result = List.concat_map insert_stmt vf_bblocks in
+                       if !found <> 1 then
+                         Ast.static_error fn_sig_loc
+                           "Post-retirement generated Drop control did not find exactly one matching StorageDead"
+                           None;
+                       result
+                   | _ -> Ast.static_error fn_sig_loc
+                       "Post-retirement generated Drop control found multiple qualified Drops" None)
+              | _ -> vf_bblocks
             in
             let vf_bblocks =
               match State.callback_close, State.callback_recover, !State.callback_call_loc with
