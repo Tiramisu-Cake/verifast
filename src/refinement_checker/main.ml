@@ -308,7 +308,7 @@ let check_generated_pair body0 body1 =
         {s with source_info={span=Dummy}}) bb.statements in
       let kind = match bb.terminator.kind with
         | Call call ->
-            let func = match call.func with
+            let func: Vf_mir_decoder.operand = match call.func with
               | Constant c -> Constant {c with span=Dummy}
               | operand -> operand
             in
