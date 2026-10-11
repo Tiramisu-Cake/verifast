@@ -871,6 +871,9 @@ use rustc_span::RemapPathScopeComponents;
                                             writeln!(observation, "\n--- resolved selected method exporter-owned MIR pretty (mir_drops_elaborated_and_const_checked) ---").unwrap();
                                             observation.push_str(&crate::mir_utils::mir_body_pretty_string(tcx, selected_body));
                                             writeln!(observation, "\n--- resolved selected method exporter-owned MIR debug ---\n{selected_debug}").unwrap();
+                                            std::fs::write(&partial_path, observation.as_bytes()).expect("cannot checkpoint captured method MIR");
+                                            writeln!(observation, "selected_drop_signature={:?}", tcx.fn_sig(destructor)).unwrap();
+                                            writeln!(observation, "call_resolved_type={:?}", callee_instance.ty(tcx, ty::TypingEnv::fully_monomorphized())).unwrap();
                                         } else {
                                             writeln!(observation, "selected_method_mir_capture=not-in-exporter-owned-body-list instance_args={:?}", callee_instance.args).unwrap();
                                         }
@@ -892,6 +895,9 @@ use rustc_span::RemapPathScopeComponents;
                     _ => {}
                 }
             }
+
+            std::fs::write(&partial_path, observation.as_bytes()).expect("cannot checkpoint complete binding");
+            writeln!(observation, "resolved_instance_type={:?}", instance.ty(tcx, ty::TypingEnv::fully_monomorphized())).unwrap();
 
             let mut file = std::fs::OpenOptions::new()
                 .write(true)
