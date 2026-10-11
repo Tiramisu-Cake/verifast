@@ -743,6 +743,7 @@ use rustc_span::RemapPathScopeComponents;
             guard: ty::AdtDef<'tcx>,
             destructor: rustc_hir::def_id::DefId,
             drop_ty: ty::Ty<'tcx>,
+            exported_bodies: &[(mir::Body<'tcx>, Span)],
         ) {
             let Some(observation_dir) = std::env::var_os("SMALLSORT_GLUE_OBSERVATION_DIR") else {
                 return;
@@ -788,7 +789,7 @@ use rustc_span::RemapPathScopeComponents;
             let mut observation = String::new();
             use std::fmt::Write as _;
 
-            writeln!(observation, "format=small-sort-drop-glue-observation-v2").unwrap();
+            writeln!(observation, "format=small-sort-drop-glue-observation-v3").unwrap();
             writeln!(observation, "observation_sequence={sequence}").unwrap();
             writeln!(observation, "caller_def_path={}", tcx.def_path_str(caller_def_id)).unwrap();
             writeln!(observation, "caller_def_path_hash={caller_hash}").unwrap();
@@ -854,15 +855,18 @@ use rustc_span::RemapPathScopeComponents;
                                     writeln!(observation, "call_resolved_def_path block={block_id:?} path={} hash={:?} selected_drop_match={resolved_selected_drop_match}", tcx.def_path_str(callee_instance.def_id()), tcx.def_path_hash(callee_instance.def_id())).unwrap();
                                     writeln!(observation, "call_resolved_kind block={block_id:?} kind={:?} args={:?} type={:?}", callee_instance.def, callee_instance.args, callee_instance.ty(tcx, ty::TypingEnv::fully_monomorphized())).unwrap();
                                     if resolved_selected_drop_match {
-                                        let selected_body = tcx.instance_mir(callee_instance.def);
-                                        let selected_debug = format!("{selected_body:#?}");
-                                        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                                        use std::hash::{Hash, Hasher};
-                                        selected_debug.hash(&mut hasher);
-                                        writeln!(observation, "selected_method_mir_debug_hash={:016x} hash_kind=DefaultHasher-of-Debug-output instance_args={:?}", hasher.finish(), callee_instance.args).unwrap();
-                                        writeln!(observation, "\n--- resolved selected method raw MIR pretty ---").unwrap();
-                                        observation.push_str(&crate::mir_utils::mir_body_pretty_string(tcx, selected_body));
-                                        writeln!(observation, "\n--- resolved selected method raw MIR debug ---\n{selected_debug}").unwrap();
+                                        if let Some((selected_body, _)) = exported_bodies.iter().find(|(body, _)| body.source.def_id() == callee_instance.def_id()) {
+                                            let selected_debug = format!("{selected_body:#?}");
+                                            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                                            use std::hash::{Hash, Hasher};
+                                            selected_debug.hash(&mut hasher);
+                                            writeln!(observation, "selected_method_mir_debug_hash={:016x} hash_kind=DefaultHasher-of-Debug-output body_query=mir_drops_elaborated_and_const_checked instance_args={:?}", hasher.finish(), callee_instance.args).unwrap();
+                                            writeln!(observation, "\n--- resolved selected method exporter-owned MIR pretty (mir_drops_elaborated_and_const_checked) ---").unwrap();
+                                            observation.push_str(&crate::mir_utils::mir_body_pretty_string(tcx, selected_body));
+                                            writeln!(observation, "\n--- resolved selected method exporter-owned MIR debug ---\n{selected_debug}").unwrap();
+                                        } else {
+                                            writeln!(observation, "selected_method_mir_capture=not-in-exporter-owned-body-list instance_args={:?}", callee_instance.args).unwrap();
+                                        }
                                     }
                                 }
                                 Ok(None) => writeln!(observation, "call_resolve block={block_id:?} status=unresolved-none").unwrap(),
@@ -1114,7 +1118,7 @@ use rustc_span::RemapPathScopeComponents;
                     annot.span().unwrap().data().hi
                 }).collect::<Vec<_>>();
                 let mut enc_ctx = EncCtx::new(self.tcx, EncKind::Body(body), annots, mut_annots);
-                Self::encode_body(&mut enc_ctx, body_cpn);
+                Self::encode_body(&mut enc_ctx, body_cpn, &self.bodies);
                 req_adt_defs.extend(enc_ctx.get_req_adts());
             });
 
@@ -1514,7 +1518,7 @@ use rustc_span::RemapPathScopeComponents;
             }
         }
 
-        fn encode_body(enc_ctx: &mut EncCtx<'tcx, 'a>, mut body_cpn: body_cpn::Builder<'_>) {
+        fn encode_body(enc_ctx: &mut EncCtx<'tcx, 'a>, mut body_cpn: body_cpn::Builder<'_>, exported_bodies: &[(mir::Body<'tcx>, Span)]) {
             let tcx = enc_ctx.tcx;
             let body = enc_ctx.body();
             trace!("Encoding MIR: {:?}", body.source.instance);
@@ -2813,6 +2817,7 @@ use rustc_span::RemapPathScopeComponents;
                                         *adt,
                                         did,
                                         place_ty,
+                                        exported_bodies,
                                     );
                                 }
                             }
