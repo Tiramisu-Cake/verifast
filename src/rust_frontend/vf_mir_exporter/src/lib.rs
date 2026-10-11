@@ -785,7 +785,6 @@ use rustc_span::RemapPathScopeComponents;
             let path = observation_dir.join(file_name);
 
             let instance = ty::Instance::resolve_drop_glue(tcx, drop_ty);
-            let glue_body = tcx.instance_mir(instance.def);
             let mut observation = String::new();
             use std::fmt::Write as _;
 
@@ -800,14 +799,15 @@ use rustc_span::RemapPathScopeComponents;
             writeln!(observation, "guard_def_path_hash={guard_hash}").unwrap();
             writeln!(observation, "selected_drop_def_path={}", tcx.def_path_str(destructor)).unwrap();
             writeln!(observation, "selected_drop_def_path_hash={:?}", tcx.def_path_hash(destructor)).unwrap();
-            writeln!(observation, "selected_drop_signature={:?}", tcx.fn_sig(destructor)).unwrap();
             writeln!(observation, "resolved_instance={instance:?}").unwrap();
             writeln!(observation, "resolved_instance_kind={:?}", instance.def).unwrap();
             writeln!(observation, "resolve_drop_glue_typing_env={:?}", ty::TypingEnv::fully_monomorphized()).unwrap();
-            writeln!(observation, "resolved_instance_type={:?}", instance.ty(tcx, ty::TypingEnv::fully_monomorphized())).unwrap();
             writeln!(observation, "resolved_instance_def_path={}", tcx.def_path_str(instance.def_id())).unwrap();
             writeln!(observation, "resolved_instance_def_path_hash={:?}", tcx.def_path_hash(instance.def_id())).unwrap();
             writeln!(observation, "resolved_instance_args={:?}", instance.args).unwrap();
+            let partial_path = path.with_extension("partial");
+            std::fs::write(&partial_path, observation.as_bytes()).expect("cannot checkpoint glue identity");
+            let glue_body = tcx.instance_mir(instance.def);
             writeln!(observation, "glue_body_source_instance={:?}", glue_body.source.instance).unwrap();
             for (local, decl) in glue_body.local_decls.iter_enumerated() {
                 writeln!(observation, "glue_local index={local:?} type={:?}", decl.ty).unwrap();
@@ -824,6 +824,7 @@ use rustc_span::RemapPathScopeComponents;
             observation.push_str(&crate::mir_utils::mir_body_pretty_string(tcx, glue_body));
             writeln!(observation, "\n--- full raw MIR debug ---\n{glue_body:#?}").unwrap();
             writeln!(observation, "--- call/drop edge observations ---").unwrap();
+            std::fs::write(&partial_path, observation.as_bytes()).expect("cannot checkpoint raw glue MIR");
             for (block_id, block) in glue_body.basic_blocks.iter_enumerated() {
                 let terminator = block.terminator();
                 match &terminator.kind {
@@ -843,6 +844,7 @@ use rustc_span::RemapPathScopeComponents;
                                 *callee_def_id == destructor,
                             )
                             .unwrap();
+                            std::fs::write(&partial_path, observation.as_bytes()).expect("cannot checkpoint raw trait callee");
                             match ty::Instance::try_resolve(
                                 tcx,
                                 ty::TypingEnv::fully_monomorphized(),
@@ -851,11 +853,16 @@ use rustc_span::RemapPathScopeComponents;
                             ) {
                                 Ok(Some(callee_instance)) => {
                                     let resolved_selected_drop_match = callee_instance.def_id() == destructor;
+                                    let expected_args = match drop_ty.kind() { ty::TyKind::Adt(_, args) => *args, _ => unreachable!() };
+                                    let expected_instance = ty::Instance { def: ty::InstanceKind::Item(destructor), args: expected_args };
+                                    writeln!(observation, "call_expected_destructor_instance block={block_id:?} expected={expected_instance:?} exact_instance_match={}", callee_instance == expected_instance).unwrap();
                                     writeln!(observation, "call_resolve block={block_id:?} status=resolved instance={callee_instance:?}").unwrap();
                                     writeln!(observation, "call_resolved_def_path block={block_id:?} path={} hash={:?} selected_drop_match={resolved_selected_drop_match}", tcx.def_path_str(callee_instance.def_id()), tcx.def_path_hash(callee_instance.def_id())).unwrap();
-                                    writeln!(observation, "call_resolved_kind block={block_id:?} kind={:?} args={:?} type={:?}", callee_instance.def, callee_instance.args, callee_instance.ty(tcx, ty::TypingEnv::fully_monomorphized())).unwrap();
+                                    writeln!(observation, "call_resolved_kind block={block_id:?} kind={:?} args={:?}", callee_instance.def, callee_instance.args).unwrap();
+                                    std::fs::write(&partial_path, observation.as_bytes()).expect("cannot checkpoint resolved trait callee");
                                     if resolved_selected_drop_match {
                                         if let Some((selected_body, _)) = exported_bodies.iter().find(|(body, _)| body.source.def_id() == callee_instance.def_id()) {
+                                            writeln!(observation, "selected_method_capture owner={:?} source_instance={:?} phase={:?} body_query=mir_drops_elaborated_and_const_checked instantiated=false concrete_args={:?}", selected_body.source.def_id(), selected_body.source.instance, selected_body.phase, callee_instance.args).unwrap();
                                             let selected_debug = format!("{selected_body:#?}");
                                             let mut hasher = std::collections::hash_map::DefaultHasher::new();
                                             use std::hash::{Hash, Hasher};
@@ -1701,6 +1708,7 @@ use rustc_span::RemapPathScopeComponents;
                         basic_block_idx,
                         basic_block,
                         basic_block_cpn,
+                        exported_bodies,
                     );
                 },
             );
@@ -2347,6 +2355,7 @@ use rustc_span::RemapPathScopeComponents;
             basic_block_idx: mir::BasicBlock,
             basic_block_data: &mir::BasicBlockData<'tcx>,
             mut basic_block_cpn: basic_block_cpn::Builder<'_>,
+            exported_bodies: &[(mir::Body<'tcx>, Span)],
         ) {
             let basic_block_id_cpn = basic_block_cpn.reborrow().init_id();
             Self::encode_basic_block_id(basic_block_idx, basic_block_id_cpn);
@@ -2359,7 +2368,7 @@ use rustc_span::RemapPathScopeComponents;
             );
 
             let terminator_cpn = basic_block_cpn.reborrow().init_terminator();
-            Self::encode_terminator(tcx, enc_ctx, basic_block_data.terminator(), terminator_cpn);
+            Self::encode_terminator(tcx, enc_ctx, basic_block_data.terminator(), terminator_cpn, exported_bodies);
 
             basic_block_cpn.set_is_cleanup(basic_block_data.is_cleanup);
         }
@@ -2723,11 +2732,12 @@ use rustc_span::RemapPathScopeComponents;
             enc_ctx: &mut EncCtx<'tcx, 'a>,
             terminator: &mir::Terminator<'tcx>,
             mut terminator_cpn: terminator_cpn::Builder<'_>,
+            exported_bodies: &[(mir::Body<'tcx>, Span)],
         ) {
             let src_info_cpn = terminator_cpn.reborrow().init_source_info();
             Self::encode_source_info(tcx, &terminator.source_info, src_info_cpn);
             let terminator_kind_cpn = terminator_cpn.init_kind();
-            Self::encode_terminator_kind(tcx, enc_ctx, &terminator.kind, terminator.source_info.span, terminator_kind_cpn);
+            Self::encode_terminator_kind(tcx, enc_ctx, &terminator.kind, terminator.source_info.span, terminator_kind_cpn, exported_bodies);
         }
 
         fn encode_terminator_kind(
@@ -2736,6 +2746,7 @@ use rustc_span::RemapPathScopeComponents;
             terminator_kind: &mir::TerminatorKind<'tcx>,
             source_span: Span,
             mut terminator_kind_cpn: terminator_kind_cpn::Builder<'_>,
+            exported_bodies: &[(mir::Body<'tcx>, Span)],
         ) {
             match terminator_kind {
                 mir::TerminatorKind::Goto { target } => {
