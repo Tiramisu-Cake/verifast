@@ -546,6 +546,8 @@ let fns_to_be_inlined: (string * body) list =
           statements=[];
           terminator={
             kind=Drop {
+              selected_drop_path=""; selected_drop_hash=""; selected_guard_path="";
+              is_bare_local=false; is_replace=false; generated_body_key="";
               place={
                 local={name="self"};
                 projection=[Field {index=Stdint.Uint32.of_int 1; name=Something {name="1"}; ty={kind=Param "A"}}];
@@ -570,6 +572,8 @@ let fns_to_be_inlined: (string * body) list =
           statements=[];
           terminator={
             kind=Drop {
+              selected_drop_path=""; selected_drop_hash=""; selected_guard_path="";
+              is_bare_local=false; is_replace=false; generated_body_key="";
               place={
                 local={name="self"};
                 projection=[Field {index=Stdint.Uint32.of_int 1; name=Something {name="1"}; ty={kind=Param "A"}}];
