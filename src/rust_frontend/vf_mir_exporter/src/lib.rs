@@ -776,19 +776,11 @@ use rustc_span::RemapPathScopeComponents;
             let caller_hash = format!("{:?}", tcx.def_path_hash(caller_def_id));
             let guard_hash = format!("{:?}", tcx.def_path_hash(guard.did()));
             let caller_instance = format!("{:?}", caller_body.source.instance);
-            let caller_instance_id = caller_instance
-                .chars()
-                .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
-                .collect::<String>();
             let span_data = caller_span.data();
-            let file_name = format!(
-                "caller_{}_instance_{}_guard_{}_lo{}_hi{}.txt",
-                caller_hash,
-                caller_instance_id,
-                guard_hash,
-                span_data.lo.as_u32(),
-                span_data.hi.as_u32(),
-            );
+            static NEXT_OBSERVATION: std::sync::atomic::AtomicUsize =
+                std::sync::atomic::AtomicUsize::new(0);
+            let sequence = NEXT_OBSERVATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let file_name = format!("drop-{sequence:06}.txt");
             let path = observation_dir.join(file_name);
 
             let instance = ty::Instance::resolve_drop_glue(tcx, drop_ty);
@@ -797,6 +789,7 @@ use rustc_span::RemapPathScopeComponents;
             use std::fmt::Write as _;
 
             writeln!(observation, "format=small-sort-drop-glue-observation-v1").unwrap();
+            writeln!(observation, "observation_sequence={sequence}").unwrap();
             writeln!(observation, "caller_def_path={}", tcx.def_path_str(caller_def_id)).unwrap();
             writeln!(observation, "caller_def_path_hash={caller_hash}").unwrap();
             writeln!(observation, "caller_instance={caller_instance}").unwrap();
