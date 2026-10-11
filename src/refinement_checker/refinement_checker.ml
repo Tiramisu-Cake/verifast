@@ -2547,10 +2547,20 @@ let check_body_refines_body bodies0 bodies1 def_path body0 body1 =
         | UnwindResume, UnwindResume -> ()
         | UnwindTerminate, UnwindTerminate -> ()
         | (Return, Return) ->
-            let retVal0 = List.assoc {lv_caller=None; lv_name=locals0.(0).id.name} env0 in
-            let retVal1 = List.assoc {lv_caller=None; lv_name=locals1.(0).id.name} env1 in
+            (* The compiler-owned, separately shape-qualified DropGlue returns
+               unit without assigning _0. Compare this case explicitly; do not
+               manufacture a value for an absent non-unit return local. *)
+            let return_value (body: body) (locals: local_decl array) env =
+              match List.assoc_opt {lv_caller=None; lv_name=locals.(0).id.name} env with
+              | Some value -> Some value
+              | None when body.generated_glue.enabled && body.output.kind = Tuple [] &&
+                          locals.(0).ty.kind = Tuple [] -> None
+              | None -> error "Return local has no value in the refinement environment"
+            in
+            let retVal0 = return_value body0 locals0 env0 in
+            let retVal1 = return_value body1 locals1 env1 in
             if retVal0 <> retVal1 then
-              error (Printf.sprintf "In function %s, at basic block %s in the original crate and basic block %s in the verified crate, the return values %s and %s are not equal" def_path i_bb0#to_string i_bb1#to_string (string_of_local_var_state retVal0) (string_of_local_var_state retVal1))
+              error (Printf.sprintf "In function %s, at basic block %s in the original crate and basic block %s in the verified crate, the return values are not equal" def_path i_bb0#to_string i_bb1#to_string)
         | _, Unreachable -> ()
         | (Call call0, Call call1) ->
           let func0 = call0.func in
