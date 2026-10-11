@@ -809,7 +809,7 @@ use rustc_span::RemapPathScopeComponents;
             writeln!(observation, "resolved_instance_args={:?}", instance.args).unwrap();
             writeln!(observation, "glue_body_source_instance={:?}", glue_body.source.instance).unwrap();
             for (local, decl) in glue_body.local_decls.iter_enumerated() {
-                writeln!(observation, "glue_local index={local:?} type={:?} name={:?}", decl.ty, decl.name).unwrap();
+                writeln!(observation, "glue_local index={local:?} type={:?}", decl.ty).unwrap();
             }
             let ref_rvalue_count = glue_body.basic_blocks.iter().flat_map(|block| block.statements.iter()).filter(|statement| {
                 matches!(&statement.kind, mir::StatementKind::Assign(assign) if matches!(&assign.1, mir::Rvalue::Ref(..)))
@@ -846,7 +846,7 @@ use rustc_span::RemapPathScopeComponents;
                                 tcx,
                                 ty::TypingEnv::fully_monomorphized(),
                                 *callee_def_id,
-                                *callee_args,
+                                tcx.instantiate_bound_regions_with_erased(*callee_args),
                             ) {
                                 Ok(Some(callee_instance)) => {
                                     let resolved_selected_drop_match = callee_instance.def_id() == destructor;
