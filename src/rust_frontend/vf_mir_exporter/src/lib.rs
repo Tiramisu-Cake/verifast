@@ -1098,6 +1098,108 @@ use rustc_span::RemapPathScopeComponents;
             });
             adt_def_cpn.set_implements_drop(adt_def.has_dtor(tcx));
             adt_def_cpn.set_is_repr_c(adt_def.repr().c());
+            if let Some((def_path, size, align, offsets, field_sizes)) = Self::concrete_guard_layout(tcx, adt_def) {
+                adt_def_cpn.set_has_concrete_guard_layout(true);
+                adt_def_cpn.set_concrete_guard_def_path(&def_path);
+                let def_path_hash = format!("{:?}", tcx.def_path_hash(adt_def.did()));
+                adt_def_cpn.set_concrete_guard_def_path_hash(&def_path_hash);
+                adt_def_cpn.set_concrete_guard_size_bytes(size);
+                adt_def_cpn.set_concrete_guard_align_bytes(align);
+                {
+                    let mut values = adt_def_cpn.reborrow().init_concrete_guard_field_offsets(offsets.len());
+                    for (index, offset) in offsets.iter().copied().enumerate() {
+                        let offset = offset.to_string();
+                        values.set(index, &offset);
+                    }
+                }
+                {
+                    let mut values = adt_def_cpn.reborrow().init_concrete_guard_field_sizes(field_sizes.len());
+                    for (index, field_size) in field_sizes.iter().copied().enumerate() {
+                        let field_size = field_size.to_string();
+                        values.set(index, &field_size);
+                    }
+                }
+            }
+        }
+
+        // Export a compiler layout only for the exact concrete guard shape used
+        // by the source-linked u64 Drop diagnostic. In particular, do not turn
+        // a generic ADT definition into a guessed or universally positive size.
+        fn concrete_guard_layout(
+            tcx: TyCtxt<'tcx>,
+            adt_def: &ty::AdtDef<'tcx>,
+        ) -> Option<(String, u64, u64, Vec<u64>, Vec<u64>)> {
+            let did = adt_def.did();
+            const CONCRETE_GUARD_SOURCE: &str = "struct CopyOnDrop {\n    src: *const u64,\n    dst: *mut u64,\n    len: usize,\n}";
+            if !did.is_local() {
+                return None;
+            }
+            let rustc_hir::Node::Item(item) = tcx.hir_node_by_def_id(did.expect_local()) else {
+                return None;
+            };
+            let source = tcx.sess.source_map().span_to_snippet(item.span).ok()?;
+            if !did.is_local()
+                || !(source == CONCRETE_GUARD_SOURCE || source == format!("{}\n", CONCRETE_GUARD_SOURCE))
+                || tcx.sess.target.llvm_target != "x86_64-unknown-linux-gnu"
+                || tcx.sess.target.pointer_width != 64
+                || !adt_def.is_struct()
+                || !tcx.generics_of(did).own_params.is_empty()
+                || tcx.generics_of(did).parent_count != 0
+                || adt_def.variants().len() != 1
+                || adt_def.repr().packed()
+                || adt_def.repr().c()
+                || adt_def.repr().transparent()
+                || adt_def.repr().simd()
+                || adt_def.repr().align.is_some()
+            {
+                return None;
+            }
+
+            let fields = &adt_def.non_enum_variant().fields;
+            if fields.len() != 3
+                || fields.iter().nth(0)?.name.as_str() != "src"
+                || fields.iter().nth(1)?.name.as_str() != "dst"
+                || fields.iter().nth(2)?.name.as_str() != "len"
+            {
+                return None;
+            }
+
+            let field_ty = |index: usize| {
+                tcx.type_of(fields.iter().nth(index).expect("checked three-field guard").did)
+                    .instantiate_identity()
+                    .skip_normalization()
+            };
+            let is_u64 = |ty: ty::Ty<'tcx>| matches!(ty.kind(), ty::TyKind::Uint(ty::UintTy::U64));
+            let is_usize = |ty: ty::Ty<'tcx>| matches!(ty.kind(), ty::TyKind::Uint(ty::UintTy::Usize));
+            if !matches!(field_ty(0).kind(), ty::TyKind::RawPtr(pointee, mir::Mutability::Not) if is_u64(*pointee))
+                || !matches!(field_ty(1).kind(), ty::TyKind::RawPtr(pointee, mir::Mutability::Mut) if is_u64(*pointee))
+                || !is_usize(field_ty(2))
+            {
+                return None;
+            }
+
+            let guard_ty = tcx.type_of(adt_def.did()).instantiate_identity().skip_normalization();
+            let typing_env = ty::TypingEnv::new(ty::ParamEnv::empty(), ty::TypingMode::PostAnalysis);
+            let layout = tcx.layout_of(typing_env.as_query_input(guard_ty)).ok()?;
+            let size = layout.size.bytes();
+            let align = layout.align.abi.bytes();
+            if size == 0 || align == 0 {
+                return None;
+            }
+            let offsets = (0..fields.len())
+                .map(|index| layout.fields.offset(index).bytes())
+                .collect::<Vec<_>>();
+            let mut field_sizes = Vec::with_capacity(fields.len());
+            for (index, offset) in offsets.iter().copied().enumerate() {
+                let member_layout = tcx.layout_of(typing_env.as_query_input(field_ty(index))).ok()?;
+                let field_size = member_layout.size.bytes();
+                let end = offset.checked_add(field_size)?;
+                if end > size {
+                    return None;
+                }
+                field_sizes.push(field_size);
+            }
+            Some((tcx.def_path_str(did), size, align, offsets, field_sizes))
         }
 
         fn encode_adt_kind(adt_kind: ty::AdtKind, mut adt_kind_cpn: adt_kind_cpn::Builder<'_>) {

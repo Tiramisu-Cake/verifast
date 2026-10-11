@@ -106,6 +106,24 @@ fix ptr_add(p: pointer, offset: i32) -> pointer {
     pointer_ctor(p.provenance, p.address + offset, p.metadata)
 }
 
+// The bounded wrapping-pointer contracts below call this with a byte offset
+// in [-size_of(T), size_of(T)].  Since size_of(T) <= usize::MAX, one correction
+// suffices to represent the modular address.  Keep both provenance and metadata.
+fix wrapping_pointer_offset(p: pointer, byte_offset: i32) -> pointer {
+    pointer_ctor(
+        p.provenance,
+        if p.address + byte_offset < 0 {
+            p.address + byte_offset + usize::MAX + 1
+        } else {
+            if usize::MAX < p.address + byte_offset {
+                p.address + byte_offset - usize::MAX - 1
+            } else {
+                p.address + byte_offset
+            }
+        },
+        p.metadata)
+}
+
 fix ptr_add_strip_metadata(p: pointer, offset: i32) -> pointer {
     pointer_ctor(p.provenance, p.address + offset, pointer_metadata_none)
 }

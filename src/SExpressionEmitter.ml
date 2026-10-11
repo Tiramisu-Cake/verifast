@@ -170,6 +170,19 @@ let sexpr_of_type_expr_option : type_expr option -> sexpression = function
 
 let sexpr_of_attr : struct_attr -> sexpression = function
   | Packed -> Symbol "packed"
+  | ReprC -> Symbol "repr-c"
+  | RustConcreteGuardLayout layout ->
+      let quoted s = Symbol (Printf.sprintf "%S" s) in
+      let number s = Number (Big_int.big_int_of_string s) in
+      build_list [Symbol "rust-concrete-guard-layout"]
+        [ "source-def-path", quoted layout.source_def_path
+        ; "source-def-path-hash", quoted layout.source_def_path_hash
+        ; "target-triple", quoted layout.target_triple
+        ; "pointer-width", sexpr_of_int layout.pointer_width
+        ; "size-bytes", number layout.size_bytes
+        ; "align-bytes", number layout.align_bytes
+        ; "field-offsets", List (List.map number layout.field_offsets)
+        ; "field-sizes", List (List.map number layout.field_sizes) ]
 
 let sexpr_of_field (Field (loc, ghostness, type_expr, name, binding, visibility, final, expr)) : sexpression =
   build_list
@@ -844,6 +857,10 @@ let rec sexpr_of_stmt (stmt : stmt) : sexpression =
     | ExprStmt expr ->
       List [ Symbol "stmt-expression"
            ; sexpr_of_expr expr ]
+    | RustStorageLiveStmt (_, _, mir_local_id, local) ->
+      List [ Symbol "stmt-rust-storage-live"; Symbol mir_local_id; Symbol local ]
+    | RustStorageDeadStmt (_, _, mir_local_id, local) ->
+      List [ Symbol "stmt-rust-storage-dead"; Symbol mir_local_id; Symbol local ]
     | WhileStmt (loc, cond, invariant, expr, body, final_ss) ->
       build_list [ Symbol "stmt-while" ]
                  [ "condition", sexpr_of_expr cond

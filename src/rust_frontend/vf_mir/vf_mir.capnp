@@ -279,6 +279,15 @@ struct AdtDef {
     clauses @7: List(Clause);
     implementsDrop @8: Bool;
     isReprC @11: Bool;
+    # Present only for the narrowly supported fully concrete SmallSort guard
+    # shape. Values come from rustc's target-specific Layout query.
+    hasConcreteGuardLayout @12: Bool;
+    concreteGuardDefPathHash @13: Text;
+    concreteGuardSizeBytes @14: UInt64;
+    concreteGuardAlignBytes @15: UInt64;
+    concreteGuardFieldOffsets @16: List(Text);
+    concreteGuardFieldSizes @17: List(Text);
+    concreteGuardDefPath @18: Text;
 }
 
 enum AliasTyKind {

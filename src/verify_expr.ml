@@ -66,6 +66,7 @@ module VerifyExpr(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
       PureStmt (l, s) -> assigned_variables s
     | NonpureStmt (l, _, s) -> assigned_variables s
     | ExprStmt e -> expr_assigned_variables e
+    | RustStorageLiveStmt _ | RustStorageDeadStmt _ -> []
     | DeclStmt (l, xs) -> flatmap (fun (_, _, x, e, _) -> (match e with None -> [] | Some e -> expr_assigned_variables e)) xs
     | IfStmt (l, e, ss1, ss2) -> expr_assigned_variables e @ block_assigned_variables ss1 @ block_assigned_variables ss2
     | ProduceLemmaFunctionPointerChunkStmt (l, e, ftclause, body) ->

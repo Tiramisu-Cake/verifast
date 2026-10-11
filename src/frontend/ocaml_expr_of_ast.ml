@@ -786,6 +786,8 @@ and of_stmt = function
     end ds
   ])
 | ExprStmt e -> C ("ExprStmt", [of_expr e])
+| RustStorageLiveStmt (l, mir_l, id, x) -> C ("RustStorageLiveStmt", [of_loc l; of_loc mir_l; S id; S x])
+| RustStorageDeadStmt (l, mir_l, id, x) -> C ("RustStorageDeadStmt", [of_loc l; of_loc mir_l; S id; S x])
 | IfStmt (l, e, sst, ssf) ->
   C ("IfStmt", [
     of_loc l;
@@ -841,7 +843,7 @@ and of_stmt = function
   ])
 | PerformActionStmt (_, _, _, _, _, _, _, _, _, _, _, _) -> failwith "TODO"
 | SplitFractionStmt (_, _, _, _, _) -> failwith "TODO"
-| MergeFractionsStmt (_, _) -> failwith "TODO"
+| MergeFractionsStmt (l, e) -> C ("MergeFractionsStmt", [of_loc l; of_expr e])
 | CreateBoxStmt (_, _, _, _, _, _, _) -> failwith "TODO"
 | CreateHandleStmt (_, _, _, _, _) -> failwith "TODO"
 | DisposeBoxStmt (_, _, _, _) -> failwith "TODO"
@@ -1170,6 +1172,16 @@ and of_ctor = function
 and of_struct_attr = function
   Packed -> c "Packed"
 | ReprC -> c "ReprC"
+| RustConcreteGuardLayout layout -> C ("RustConcreteGuardLayout", [C ("make_rust_concrete_guard_layout", [
+    S layout.source_def_path;
+    S layout.source_def_path_hash;
+    S layout.target_triple;
+    I layout.pointer_width;
+    S layout.size_bytes;
+    S layout.align_bytes;
+    of_list s layout.field_offsets;
+    of_list s layout.field_sizes
+  ])])
 and of_constant_value = function
   IntConst n -> C ("IntConst", [BigInt n])
 | BoolConst b -> C ("BoolConst", [B b])

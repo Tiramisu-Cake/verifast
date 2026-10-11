@@ -71,6 +71,11 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
   
   include CheckFile_VerifyExpr(CheckFileArgs)
   
+  (* Experimental Rust MIR storage domain. Context lists are immutable during
+     a body proof; active epochs live in the path-local environment. An entry
+     chunk is usable only while that exact resource object remains in the heap. *)
+  let rust_storage_context = ref ([], [], [])
+
   (* Region: verification of statements *)
   
   let verify_expr readonly (pn,ilist) tparams pure leminfo funcmap sizemap tenv ghostenv h env xo e cont econt =
@@ -178,9 +183,13 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
     let break_label () = if pure then "#ghostBreak" else "#break" in
     let continue_label () = if pure then "#ghostContinue" else "#continue" in
     let free_locals closeBraceLoc h tenv env locals cont =
+      (* Any cleanup route retires the allocation receipt, including block and
+         loop cleanup that is not preceded by an explicit MIR StorageDead. *)
+      let released_env = List.fold_left (fun env (x, _) ->
+        List.remove_assoc ("$rust_storage_live$" ^ x) env) env locals in
       let rec free_locals_core h locals =
         match locals with
-          [] -> cont h env
+          [] -> cont h released_env
         | (x, isConstVar)::locals ->
           match try_assoc x env with
             None ->
@@ -985,6 +994,69 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
           cont h
       end $. fun h ->
       cont (Chunk ((module_symb, true), [], real_unit, [current_module_term; ctxt#mk_false], None)::h) env
+    | (RustStorageLiveStmt (l, _, _, x) | RustStorageDeadStmt (l, _, _, x)) as storage_stmt ->
+      let is_dead = match storage_stmt with RustStorageDeadStmt _ -> true | _ -> false in
+      if dialect <> Some Rust || pure then
+        static_error l "MIR storage markers require a real Rust execution context." None;
+      let incoming, deferred, consts = !rust_storage_context in
+      (* Parser-inexpressible, path-local allocation-origin binding.  A RefType
+         entry in env alone may denote a reference; this receipt is created only
+         by the checked MIR StorageLive allocation below and retired at Dead. *)
+      let live_key x = "$rust_storage_live$" ^ x in
+      begin match try_assoc x tenv with
+        Some (RefType t) | Some (StaticArrayType _ as t) ->
+        let is_const = match try_assoc x consts with Some b -> b | None ->
+          static_error l "MIR storage marker has no local declaration." None in
+        if is_dead then begin
+          if not (List.mem_assoc x env) then
+            static_error l "StorageDead requires a currently live local." None;
+          free_locals l h tenv env [x, is_const] $. fun h env ->
+          cont h (List.remove_assoc (live_key x) (List.remove_assoc x env))
+        end else begin
+          if List.mem_assoc x env then
+            static_error l "StorageLive requires a currently dead local." None;
+          if not (List.mem x deferred) then
+            static_error l "StorageLive local was not deferred." None;
+          let addr = get_unique_var_symb_non_ghost (x ^ "_addr") (PtrType t) in
+          (* Abstract generic and unrelated fielded layouts stay excluded.
+             Guard extent is admitted only by same-MIR qualified layout facts. *)
+          let extent_supported tp = match unfold_inferred_type tp with
+            Bool | Int _ | RustChar | Float | Double | PtrType _ | RustRefType _ -> true
+          | tp -> rust_guard_layout_supported tp in
+          let exclude_allocation p tp k =
+            let a = mk_ptr_address addr in let b = mk_ptr_address p in
+            let n = sizeof_core l env t in let m = sizeof_core l env tp in
+            let apart = ctxt#mk_or (ctxt#mk_le (ctxt#mk_add a n) b)
+              (ctxt#mk_le (ctxt#mk_add b m) a) in
+            assume (ctxt#mk_or (ctxt#mk_le n int_zero_term)
+              (ctxt#mk_or (ctxt#mk_le m int_zero_term) apart)) k in
+          let rec exclude_live locals k = match locals with
+            [] -> k ()
+          | y :: rest ->
+            begin match try_assoc y tenv, try_assoc y env, try_assoc (live_key y) env with
+              Some (RefType tp), Some p, Some receipt
+              when y <> x && p == receipt && extent_supported t && extent_supported tp ->
+              exclude_allocation p tp $. fun () -> exclude_live rest k
+            | _ -> exclude_live rest k
+            end in
+          let rec exclude_incoming chunks k = match chunks with
+            [] -> k ()
+          | (Chunk ((g, true), [tp], coef, [p; _], _) as chunk) :: rest
+            when extent_supported t && extent_supported tp &&
+              List.exists (fun entry -> entry == chunk) incoming &&
+              (g == generic_points_to_symb () || g == generic_points_to__symb ()) &&
+              not (is_dummy_frac_term coef) && ctxt#query (ctxt#mk_real_lt real_zero coef) ->
+            exclude_allocation p tp $. fun () -> exclude_incoming rest k
+          | _ :: rest -> exclude_incoming rest k in
+          exclude_incoming h $. fun () ->
+          exclude_live deferred $. fun () ->
+          let verify_ctor_call = verify_ctor_call (pn, ilist) leminfo funcmap predinstmap sizemap tenv ghostenv h env addr (Some x) in
+          produce_cxx_object l (if is_const then real_half else real_unit) addr t eval_h verify_ctor_call Uninitialized true true h env $. fun h env ->
+          cont h ((live_key x, addr) :: (x, addr) :: env)
+        end
+      | Some _ -> cont h (if is_dead then List.remove_assoc x env else env)
+      | None -> static_error l "MIR storage marker names an unknown local." None
+      end
     | DeclStmt (ld, xs) ->
       let rec iter h tenv ghostenv env xs =
         match xs with
@@ -1057,7 +1129,17 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
             | _ -> true
           in
           match t with
-            StaticArrayType (elemTp, elemCount) ->
+          | _ when dialect = Some Rust &&
+              let _, deferred, _ = !rust_storage_context in List.mem x deferred &&
+              (!address_taken || match t with StructType _ | UnionType _ | StaticArrayType _ -> true | _ -> false) ->
+            if e <> None then static_error l "Deferred MIR storage declaration has an initializer." None;
+            let Some block = !blockPtr in
+            if not (List.mem_assoc x !block) then block := (x, is_const_var) :: !block;
+            let env_tp = match t with StaticArrayType _ -> t | _ -> RefType t in
+            (* Receipt has exactly the owning local's lexical scope, so normal
+               block filtering preserves it only while x remains in scope. *)
+            iter h (("$rust_storage_live$" ^ x, PtrType t) :: (x, env_tp) :: tenv) ghostenv env xs
+          | StaticArrayType (elemTp, elemCount) ->
             produce_object t
           | StructType (sn, targs) when
               !address_taken ||
@@ -2132,7 +2214,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
         produce_asn env [] h ghostenv env post real_unit None None $. fun h ghostenv env ->
         cont tenv''' ghostenv h env
       in
-      let lblenv = List.map (fun (lbl, cont) -> (lbl, fun blocks_done sizemap ttenv _ h' env' -> free_locals endBodyLoc h' ttenv env' !locals_to_free (fun h' _ -> exit_loop h' env' (cont blocks_done sizemap)))) lblenv in
+      let lblenv = List.map (fun (lbl, cont) -> (lbl, fun blocks_done sizemap ttenv _ h' env' -> free_locals endBodyLoc h' ttenv env' !locals_to_free (fun h' released_env -> exit_loop h' released_env (cont blocks_done sizemap)))) lblenv in
       let return_cont h' tenv env retval = assert_false h' [] l "Returning out of a requires-ensures loop is not yet supported." None in
       with_context (Executing (h', env', l, "Evaluating loop condition")) $. fun () ->
       eval_h_nonpure h' env' e $. fun h' env' v ->
@@ -2154,7 +2236,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
       end $. fun h' tenv''' env' ->
       begin fun continue ->
         verify_block (pn,ilist) blocks_done lblenv tparams boxes pure leminfo funcmap predinstmap sizemap tenv''' ghostenv' h' env' final_ss
-          (fun _ tenv''' _ h' env' -> free_locals endBodyLoc h' tenv''' env' !locals_to_free (fun h' _ -> continue h' tenv''' env'))
+          (fun _ tenv''' _ h' env' -> free_locals endBodyLoc h' tenv''' env' !locals_to_free (fun h' released_env -> continue h' tenv''' released_env))
           return_cont
           econt
       end $. fun h' tenv''' env' ->
@@ -2520,6 +2602,16 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
         ))
       ))
     | BlockStmt (l, ds, ss, closeBraceLoc, locals_to_free) ->
+      let outer_tparams = tparams in
+      let outer_tenv = tenv in
+      let outer_ghostenv = ghostenv in
+      let strict_lft_scope, ss =
+        match ss with
+        | ExprStmt (CallExpr (_, "#strict_lft_binding_scope", [IdentTypeExpr (_, None, name)], [], [], Static)) :: ss ->
+          Some name, ss
+        | _ -> None, ss
+      in
+      let entry_tparam_bounds = !tparam_bounds_table in
       let (lems, predinsts, localpreds, localpredinsts, typedecls) =
         List.fold_left
           begin fun (lems, predinsts, localpreds, localpredinsts, typedecls) decl ->
@@ -2560,6 +2652,15 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
           ([], [], [], [], [])
           ds
       in
+      begin match strict_lft_scope, ds, typedecls with
+      | None, _, _ -> ()
+      | Some name, [TypeWithTypeidDecl _], [(bound_name, _)] when name = bound_name ->
+        if List.mem name outer_tparams ||
+           List.mem_assoc name outer_tenv ||
+           List.mem_assoc (name ^ "_typeid") outer_tenv then
+          static_error l "Lifetime binding name shadows an outer type or value" None
+      | Some _, _, _ -> static_error l "Strict lifetime scope requires exactly its local let_lft declaration" None
+      end;
       let tparams = List.map fst typedecls @ tparams in
       let env = List.map (fun (tn, (l, typeid_term)) -> tn ^ "_typeid", typeid_term) typedecls @ env in
       let tenv = List.map (fun (tn, (l, typeid_term)) -> tn ^ "_typeid", voidPtrType) typedecls @ tenv in
@@ -2645,12 +2746,86 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
       let rec type_mentions_typedecl_type b tp =
         match unfold_inferred_type tp with
           GhostTypeParam x when List.mem_assoc x typedecls -> true
+        | BoundedGhostTypeParam (x, {eqs}) when strict_lft_scope <> None ->
+          List.fold_left (fun b ((_, args, _), rhs) ->
+            let b = List.fold_left type_mentions_typedecl_type b args in
+            type_mentions_typedecl_type b rhs)
+            (b || List.mem_assoc x typedecls) eqs
+        | RealTypeParam x when strict_lft_scope <> None ->
+          b || List.mem_assoc x typedecls
         | tp -> type_fold_open b type_mentions_typedecl_type tp
       in
+      (* A bound on an outer type parameter is proof metadata.  A bound learned
+         in this block must not make an existing heap chunk of that outer type
+         appear to own the block's lifetime after the block has ended. *)
+      let rec rebase_outer_bounds shadowed tp =
+        match tp with
+        | BoundedGhostTypeParam (x, _) when List.mem x outer_tparams && not (List.mem x shadowed) ->
+          begin match List.assoc_opt x entry_tparam_bounds with
+          | None -> GhostTypeParam x
+          | Some bounds -> BoundedGhostTypeParam (x, bounds)
+          end
+        | InferredType (_, state) ->
+          begin match !state with
+          | EqConstraint t ->
+            let t' = rebase_outer_bounds shadowed t in
+            if t' == t then tp else t'
+          | _ -> tp
+          end
+        | PtrType t ->
+          let t' = rebase_outer_bounds shadowed t in
+          if t' == t then tp else PtrType t'
+        | RustRefType (lft, kind, t) ->
+          let lft' = rebase_outer_bounds shadowed lft in
+          let t' = rebase_outer_bounds shadowed t in
+          if lft' == lft && t' == t then tp else RustRefType (lft', kind, t')
+        | InlineFuncType t ->
+          let t' = rebase_outer_bounds shadowed t in
+          if t' == t then tp else InlineFuncType t'
+        | InductiveType (name, args) ->
+          let args' = rebase_outer_bounds_list shadowed args in
+          if args' == args then tp else InductiveType (name, args')
+        | PredType (binders, args, input_count, inductiveness) ->
+          let args' = rebase_outer_bounds_list (binders @ shadowed) args in
+          if args' == args then tp else PredType (binders, args', input_count, inductiveness)
+        | PureFuncType (domain, range) ->
+          let domain' = rebase_outer_bounds shadowed domain in
+          let range' = rebase_outer_bounds shadowed range in
+          if domain' == domain && range' == range then tp else PureFuncType (domain', range')
+        | ObjType (name, args) ->
+          let args' = rebase_outer_bounds_list shadowed args in
+          if args' == args then tp else ObjType (name, args')
+        | StructType (name, args) ->
+          let args' = rebase_outer_bounds_list shadowed args in
+          if args' == args then tp else StructType (name, args')
+        | ArrayType t ->
+          let t' = rebase_outer_bounds shadowed t in
+          if t' == t then tp else ArrayType t'
+        | StaticArrayType (elem, size) ->
+          let elem' = rebase_outer_bounds shadowed elem in
+          let size' = rebase_outer_bounds shadowed size in
+          if elem' == elem && size' == size then tp else StaticArrayType (elem', size')
+        | RefType t ->
+          let t' = rebase_outer_bounds shadowed t in
+          if t' == t then tp else RefType t'
+        | ProjectionType (self, trait, args, assoc) ->
+          let self' = rebase_outer_bounds shadowed self in
+          let args' = rebase_outer_bounds_list shadowed args in
+          if self' == self && args' == args then tp else ProjectionType (self', trait, args', assoc)
+        | Slice t ->
+          let t' = rebase_outer_bounds shadowed t in
+          if t' == t then tp else Slice t'
+        | _ -> tp
+      and rebase_outer_bounds_list shadowed ts =
+        let ts' = List.map (rebase_outer_bounds shadowed) ts in
+        if List.for_all2 (==) ts ts' then ts else ts'
+      in
       let produce_consumed_lifetime_token_chunks h cont =
+        let would_discard (Chunk (_, targs, _, _, _)) =
+          List.fold_left type_mentions_typedecl_type false targs in
         let h =
-          if typedecls <> [] then
-            h |> List.filter (fun (Chunk (_, targs, _, _, _)) -> not @@ List.fold_left type_mentions_typedecl_type false targs)
+          if typedecls <> [] && strict_lft_scope = None then
+            h |> List.filter (fun chunk -> not (would_discard chunk))
           else
             h
         in
@@ -2663,22 +2838,93 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
         iter h consumed_lifetime_token_chunks
       in
       check_block_declarations ss;
-      let cont h env =
-        cont h (List.filter (fun (x, _) -> List.mem_assoc x tenv) env)
+      let check_outer_scope_snapshot () =
+        if List.exists (fun (_, tp) -> type_mentions_typedecl_type false tp) outer_tenv then
+          static_error closeBraceLoc "A lifetime-scoped type escaped into an outer variable type" None;
+        if List.exists (fun (x, bounds) ->
+          List.mem_assoc x typedecls ||
+          List.exists (fun ((_, args, _), rhs) ->
+            List.fold_left type_mentions_typedecl_type false args ||
+            type_mentions_typedecl_type false rhs) bounds.eqs)
+          entry_tparam_bounds then
+          static_error closeBraceLoc "A lifetime-scoped type escaped into outer bound metadata" None
+      in
+      let continue_outside_scope h exit_tenv cont =
+        match strict_lft_scope with
+        | None -> cont h
+        | Some _ ->
+          let h = List.map (function
+            | Chunk (symb, targs, coef, terms, size) as chunk ->
+              let targs' = rebase_outer_bounds_list [] targs in
+              if targs' == targs then chunk else Chunk (symb, targs', coef, terms, size)) h
+          in
+          let would_discard (Chunk (_, targs, _, _, _)) =
+            List.fold_left type_mentions_typedecl_type false targs in
+          begin match List.find_opt would_discard h with
+          | None -> ()
+          | Some (Chunk ((symb, _), targs, _, _, _)) ->
+            let rec directly_mentions_local b tp =
+              match unfold_inferred_type tp with
+              | GhostTypeParam x | RealTypeParam x | BoundedGhostTypeParam (x, _) ->
+                b || List.mem_assoc x typedecls
+              | tp -> type_fold_open b directly_mentions_local tp
+            in
+            let origin =
+              if List.fold_left directly_mentions_local false targs then "direct type argument"
+              else "bound metadata only"
+            in
+            static_error closeBraceLoc
+              ("A lifetime-scoped heap chunk is still live at the binding end: " ^
+               ctxt#pprint symb ^ "<" ^ String.concat ", " (List.map string_of_type targs) ^
+               "> (" ^ origin ^ ")") None
+          end;
+          if List.exists (fun (x, tp) ->
+            List.mem_assoc x outer_tenv &&
+            type_mentions_typedecl_type false (rebase_outer_bounds [] tp)) exit_tenv then
+            static_error closeBraceLoc "A lifetime-scoped local type escapes the binding" None;
+          check_outer_scope_snapshot ();
+          let saved_bounds = !tparam_bounds_table in
+          tparam_bounds_table := entry_tparam_bounds;
+          do_finally (fun () -> cont h) (fun () -> tparam_bounds_table := saved_bounds)
+      in
+      let outside_env env =
+        let visible_tenv = if strict_lft_scope = None then tenv else outer_tenv in
+        List.filter (fun (x, _) -> List.mem_assoc x visible_tenv) env
+      in
+      let cont h exit_tenv env =
+        continue_outside_scope h exit_tenv (fun h -> cont h (outside_env env))
       in
       let cont h tenv env =
         produce_consumed_lifetime_token_chunks h $. fun h ->
-        free_locals closeBraceLoc h tenv env !locals_to_free cont
+        free_locals closeBraceLoc h tenv env !locals_to_free (fun h env -> cont h tenv env)
       in
       let return_cont h tenv env retval =
         produce_consumed_lifetime_token_chunks h $. fun h ->
-        free_locals closeBraceLoc h tenv env !locals_to_free (fun h env -> return_cont h tenv env retval)
+        free_locals closeBraceLoc h tenv env !locals_to_free (fun h env ->
+          continue_outside_scope h tenv (fun h ->
+            if strict_lft_scope = None then return_cont h tenv env retval
+            else return_cont h outer_tenv (outside_env env) retval))
       in
       let lblenv = List.map (fun (lbl, lblcont) -> (lbl, (fun blocksdone sizemap tenv ghostenv h env ->
         produce_consumed_lifetime_token_chunks h $. fun h ->
-        free_locals closeBraceLoc h tenv env !locals_to_free (fun h env -> lblcont blocksdone sizemap tenv ghostenv h env)))) lblenv
+        free_locals closeBraceLoc h tenv env !locals_to_free (fun h env ->
+          continue_outside_scope h tenv (fun h ->
+            if strict_lft_scope = None then lblcont blocksdone sizemap tenv ghostenv h env
+            else lblcont blocksdone sizemap outer_tenv outer_ghostenv h (outside_env env)))))) lblenv
       in
-      verify_block (pn,ilist) blocks_done lblenv tparams boxes pure leminfo funcmap predinstmap sizemap tenv ghostenv h env ss (fun sizemap tenv ghostenv h env -> cont h tenv env) return_cont econt
+      let scoped_econt throwl h env texcep excep =
+        if strict_lft_scope = None then econt throwl h env texcep excep
+        else static_error throwl "Exception escape from a shortened lifetime binding is unsupported" None
+      in
+      let verify_scoped_block () =
+        verify_block (pn,ilist) blocks_done lblenv tparams boxes pure leminfo funcmap predinstmap sizemap tenv ghostenv h env ss (fun sizemap tenv ghostenv h env -> cont h tenv env) return_cont scoped_econt
+      in
+      if strict_lft_scope = None then verify_scoped_block ()
+      else do_finally (fun () ->
+        let result = verify_scoped_block () in
+        check_outer_scope_snapshot ();
+        result)
+        (fun () -> tparam_bounds_table := entry_tparam_bounds)
     | PureStmt (l, s) ->
       begin
         match s with
@@ -3270,6 +3516,16 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
       iter [] ss
 
   and verify_c_func_body loc (pn, ilist) tparams boxes in_pure_context leminfo funcmap predinstmap sizemap heapy_ps varargsLastParam h tenv env ghostenv post ss close_brace_loc return_cont =
+    let previous_context = !rust_storage_context in
+    let collect (lives, consts) = function
+      RustStorageLiveStmt (_, _, _, x) -> (x :: lives, consts)
+    | DeclStmt (_, ds) ->
+      (lives, List.fold_left (fun cs (_, te, x, _, _) ->
+        (x, match te with Some (ConstTypeExpr _) -> true | _ -> false) :: cs) consts ds)
+    | _ -> (lives, consts) in
+    let lives, consts = List.fold_left (stmt_fold collect) ([], []) ss in
+    rust_storage_context := ((if dialect = Some Rust then h else []), lives, consts);
+    do_finally (fun () ->
     begin fun tcont ->
       heapify_params h tenv env heapy_ps $. fun h tenv env ->
       let h =
@@ -3284,6 +3540,8 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
       verify_block (pn, ilist) [] [] tparams boxes in_pure_context leminfo funcmap predinstmap sizemap tenv ghostenv h env body tcont return_cont (fun _ _ _ -> assert false)
     end @@ fun sizemap tenv ghostenv h env ->
     verify_return_stmt (pn, ilist) [] [] tparams boxes in_pure_context leminfo funcmap predinstmap sizemap tenv ghostenv h env false close_brace_loc None [] return_cont (fun _ _ _ -> assert false)
+
+    ) (fun () -> rust_storage_context := previous_context)
 
   and verify_func pn ilist gs lems boxes predinstmap funcmap tparams env l k tparams'_with_bounds rt g ps const_params nonghost_callers_only pre pre_tenv post terminates ss closeBraceLoc =
     if startswith g "vf__" then static_error l "The name of a user-defined function must not start with 'vf__'." None;

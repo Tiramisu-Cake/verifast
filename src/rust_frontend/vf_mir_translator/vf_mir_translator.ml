@@ -1928,6 +1928,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
 
   type body_tr_defs_ctx = {
     adt_defs : Mir.adt_def_tr list;
+    ghost_decl_map : (string * Ast.decl) list;
     directives : Mir.annot list;
     fn_specializer : string -> D.generic_arg list -> string * D.generic_arg list;
   }
@@ -1942,6 +1943,10 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
     val ghost_stmts : Ast.stmt list
     val body_imp_loc : Ast.loc
     val body_tr_defs_ctx : body_tr_defs_ctx
+    val strict_lft_scope_ends : (Ast.loc * string) list
+    val callback_close : (Ast.loc * string * Ast.stmt) option
+    val callback_recover : Ast.stmt option
+    val callback_scope_start : Ast.loc option
   end) =
   struct
     module State = struct
@@ -1949,6 +1954,16 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
       let ghost_stmts = ref Args.ghost_stmts
       let body_imp_loc = Args.body_imp_loc
       let body_tr_defs_ctx = Args.body_tr_defs_ctx
+      let strict_lft_scope_ends = Args.strict_lft_scope_ends
+      let callback_close = Args.callback_close
+      let callback_recover = Args.callback_recover
+      let callback_scope_start = Args.callback_scope_start
+      let callback_used = ref false
+      let callback_call_loc = ref None
+      let fnmut_call_count = ref 0
+      let callback_unwind_label = "#merge_callback_unwind_epilogue"
+      let hrtb_fnmut_output_bounds : (string * string) list ref = ref []
+      let pending_hrtb_projection_eq : Ast.stmt list ref = ref []
 
       let fetch_ghost_stmts_before (l : Ast.loc0) =
         let* gs_before, gs_rem =
@@ -2350,6 +2365,12 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
         Rocq_writer.rocq_print_big_record_field TranslatorArgs.rocq_writer "args" @@ fun () ->
         translate_operands_core true args
       in
+      let is_ast_literal_one = function
+        | Ast.CastExpr (_, _, Ast.IntLit (_, value, _, _, _))
+        | Ast.IntLit (_, value, _, _, _) ->
+            Big_int.compare_big_int value Big_int.unit_big_int = 0
+        | _ -> false
+      in
       let translate_regular_fn_call substs fn_name =
         let targs =
           substs
@@ -2366,6 +2387,58 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
               let ghost_generic_arg_list_cpn = VfMirRd.of_pointer ptr_cpn in
               translate_ghost_generic_arg_list ghost_generic_arg_list_cpn
         in
+        let projection_equality =
+          let open Ast in
+          match (canonicalize_item_name fn_name, substs, targs) with
+          | ( "std::ops::FnMut::call_mut",
+              [ Mir.GenArgType { vf_ty = IdentTypeExpr (_, None, source_f); _ };
+                Mir.GenArgType
+                  {
+                    vf_ty =
+                      StructTypeExpr
+                        ( _, Some "std_tuple_2_", None, [],
+                          [ RustRefTypeExpr (_, _, Shared, IdentTypeExpr (_, None, source_t1));
+                            RustRefTypeExpr (_, _, Shared, IdentTypeExpr (_, None, source_t2)) ] );
+                    _
+                  };
+                Mir.GenArgLifetime _ ],
+              [ (IdentTypeExpr (_, None, ghost_f) as f_ty);
+                (StructTypeExpr
+                   ( _, Some "std_tuple_2_", None, [],
+                     [ RustRefTypeExpr
+                         (_, IdentTypeExpr (_, None, lft1), Shared, IdentTypeExpr (_, None, ghost_t1));
+                       RustRefTypeExpr
+                         (_, IdentTypeExpr (_, None, lft2), Shared, IdentTypeExpr (_, None, ghost_t2)) ] ) as args_ty);
+                IdentTypeExpr (_, None, method_lft) ] )
+            when source_f = ghost_f && source_t1 = source_t2 &&
+                 source_t1 = ghost_t1 && source_t1 = ghost_t2 &&
+                 lft1 = lft2 && lft1 = method_lft &&
+                 String.length lft1 > 0 && lft1.[0] = '\'' &&
+                 List.filter
+                   (fun (f, t) -> f = source_f && t = source_t1)
+                   !State.hrtb_fnmut_output_bounds
+                 = [ (source_f, source_t1) ] ->
+              Printf.eprintf
+                "MERGE_HRTB_CALL registered=1 function=%s F=%s T=%s lifetime=%s call=%s\n%!"
+                (canonicalize_item_name fn_name) source_f source_t1 lft1
+                (Ast.string_of_loc call_loc);
+              [ ExprStmt
+                  (CallExpr
+                     ( call_loc, "#register_type_projection_equality",
+                       [ ProjectionTypeExpr
+                           (call_loc, f_ty, "std::ops::FnOnce", [ args_ty ], "Output");
+                         ManifestTypeExpr (call_loc, Bool) ],
+                       [], [], Static )) ]
+          | _ ->
+              if canonicalize_item_name fn_name = "std::ops::FnMut::call_mut" then
+                Printf.eprintf
+                  "MERGE_HRTB_CALL registered=0 function=%s source_substs=%d ghost_substs=%d eligible_bounds=%d call=%s\n%!"
+                  (canonicalize_item_name fn_name) (List.length substs)
+                  (List.length targs) (List.length !State.hrtb_fnmut_output_bounds)
+                  (Ast.string_of_loc call_loc);
+              []
+        in
+        State.pending_hrtb_projection_eq := projection_equality;
         let args = List.map (fun expr -> Ast.LitPat expr) args in
         let call_expr =
           Ast.CallExpr
@@ -2519,6 +2592,49 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                       (`TrFnCallRExpr
                         (Printf.sprintf "Invalid (generic) arg(s) for %s"
                            fn_name)))
+            (* Keep wrapping arithmetic separate from the ordinary Add/Sub
+               pointer operations.  The target functions have bounded
+               preconditions and a modular, provenance-preserving post. *)
+            | "std::ptr::const_ptr::<impl *const T>::wrapping_add"
+            | "std::ptr::const_ptr::<impl *const T>::wrapping_sub"
+            | "std::ptr::const_ptr::<impl *const T>::wrapping_offset"
+            | "std::ptr::mut_ptr::<impl *mut T>::wrapping_add"
+            | "std::ptr::mut_ptr::<impl *mut T>::wrapping_sub"
+            | "std::ptr::mut_ptr::<impl *mut T>::wrapping_offset" -> (
+                match (substs, args_cpn) with
+                | [ Mir.GenArgType gen_arg_ty_info ], [ _; _ ] ->
+                    let [ ptr; count ] = args in
+                    let primitive_name =
+                      match fn_name with
+                      | "std::ptr::const_ptr::<impl *const T>::wrapping_add" ->
+                          "std::intrinsics::verifast_wrapping_add_const"
+                      | "std::ptr::const_ptr::<impl *const T>::wrapping_sub" ->
+                          "std::intrinsics::verifast_wrapping_sub_const"
+                      | "std::ptr::const_ptr::<impl *const T>::wrapping_offset" ->
+                          "std::intrinsics::verifast_wrapping_offset_const"
+                      | "std::ptr::mut_ptr::<impl *mut T>::wrapping_add" ->
+                          "std::intrinsics::verifast_wrapping_add_mut"
+                      | "std::ptr::mut_ptr::<impl *mut T>::wrapping_sub" ->
+                          "std::intrinsics::verifast_wrapping_sub_mut"
+                      | "std::ptr::mut_ptr::<impl *mut T>::wrapping_offset" ->
+                          "std::intrinsics::verifast_wrapping_offset_mut"
+                      | _ -> assert false
+                    in
+                    Ok
+                      ( tmp_rvalue_binders,
+                        FnCallOutcome
+                          (Ast.CallExpr
+                             ( fn_loc,
+                               primitive_name,
+                               [ gen_arg_ty_info.vf_ty ],
+                               [],
+                               [ LitPat ptr; LitPat count ],
+                               Static )) )
+                | _ ->
+                    Error
+                      (`TrFnCallRExpr
+                        (Printf.sprintf "Invalid (generic) arg(s) for %s"
+                           fn_name)))
             | "std::ptr::const_ptr::<impl *const T>::add"
             | "std::ptr::mut_ptr::<impl *mut T>::add" -> (
                 match (substs, args_cpn) with
@@ -2573,6 +2689,12 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                            (*decimal*) true,
                            (*U suffix*) false,
                            (*int literal*) Ast.NoLSuffix )) )
+            | "std::ptr::copy_nonoverlapping"
+              when (match args with
+                    | [ _src; _dst; count ] -> is_ast_literal_one count
+                    | _ -> false) ->
+                translate_regular_fn_call substs
+                  "std::ptr::merge_copy_nonoverlapping_one"
             | "std::ptr::read" | "std::ptr::mut_ptr::<impl *mut T>::read"
             | "std::ptr::const_ptr::<impl *const T>::read" ->
                 let [ src_cpn ] = args_cpn in
@@ -2673,6 +2795,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
 
     let translate_fn_call (fn_call_data_cpn : FnCallDataRd.t) (loc : Ast.loc) =
       let open FnCallDataRd in
+      State.pending_hrtb_projection_eq := [];
       Rocq_writer.rocq_print_application TranslatorArgs.rocq_writer "Call" @@ fun () ->
       Rocq_writer.rocq_print_argument TranslatorArgs.rocq_writer @@ fun () ->
       Rocq_writer.rocq_print_big_record TranslatorArgs.rocq_writer @@ fun () ->
@@ -2687,9 +2810,62 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
         translate_fn_call_rexpr func_cpn args_cpn loc fn_loc
           ghost_generic_arg_list_opt_cpn
       in
+      (match State.callback_scope_start, State.callback_close, fn_call_rexpr with
+       | Some start, Some (close_loc, _, _),
+         (FnCallOutcome (Ast.CallExpr (_, name, _, _, _, _)) |
+          FnCallResult (Ast.CallExpr (_, name, _, _, _, _))) ->
+           let pos l = fst (Ast.lexed_loc l) in
+           if pos start < pos loc && pos loc < pos close_loc &&
+              canonicalize_item_name name <> "std::ops::FnMut::call_mut" &&
+              name <> "VeriFast_ghost_command" then
+             Ast.static_error loc "Unsupported call inside callback lifetime scope" None
+       | _ -> ());
+      (match State.callback_close, fn_call_rexpr with
+       | Some _, FnCallOutcome (Ast.CallExpr (_, name, _, _, _, _))
+         when canonicalize_item_name name = "std::ops::FnMut::call_mut" ->
+           incr State.fnmut_call_count
+       | _ -> ());
       let unwind_stmts, unwind_targets =
         if TranslatorArgs.ignore_unwind_paths then ([], [])
         else translate_unwind_action (unwind_action_get fn_call_data_cpn) loc
+      in
+      let callback_cleanup =
+        match State.callback_close, fn_call_rexpr with
+        | Some (close_loc, lft, close_stmt),
+          FnCallOutcome (Ast.CallExpr (_, name, targs, [], args, Ast.Static))
+          when canonicalize_item_name name = "std::ops::FnMut::call_mut" ->
+            let typed_call =
+              match targs, args with
+              | [Ast.IdentTypeExpr (_, None, "F");
+                 Ast.StructTypeExpr (_, Some "std_tuple_2_", None, [],
+                   [Ast.RustRefTypeExpr (_, Ast.IdentTypeExpr (_, None, lft1),
+                      Ast.Shared, Ast.IdentTypeExpr (_, None, "T"));
+                    Ast.RustRefTypeExpr (_, Ast.IdentTypeExpr (_, None, lft2),
+                      Ast.Shared, Ast.IdentTypeExpr (_, None, "T"))]);
+                 Ast.IdentTypeExpr (_, None, lft3)],
+                [Ast.LitPat (Ast.Var _); Ast.LitPat (Ast.Var _)] ->
+                  lft1 = lft && lft2 = lft && lft3 = lft
+              | _ -> false
+            in
+            let (_, call_end_line, _) = snd (Ast.lexed_loc loc) in
+            let ((_, close_line, _), _) = Ast.lexed_loc close_loc in
+            if close_line = call_end_line + 1 then (
+              if !State.callback_used || not typed_call ||
+                 !State.pending_hrtb_projection_eq = [] ||
+                 TranslatorArgs.ignore_unwind_paths ||
+                 (match OptionRd.get (target_get fn_call_data_cpn) with
+                  | Something _ -> false | _ -> true) ||
+                 (match UnwindActionRd.get (unwind_action_get fn_call_data_cpn) with
+                  | UnwindActionRd.Continue -> false | _ -> true) ||
+                 (match unwind_stmts with
+                  | [Ast.ReturnStmt (_, Some (Ast.CallExpr (_, "unwinding", [], [], [], Ast.Static)))] -> false
+                  | _ -> true) then
+                Ast.static_error loc "Callback cleanup requires one typed FnMut call with unwind continue" None;
+              State.callback_used := true;
+              State.callback_call_loc := Some loc;
+              Some close_stmt)
+            else None
+        | _ -> None
       in
       let* dst, dst_is_mutable =
         Rocq_writer.rocq_print_big_record_field TranslatorArgs.rocq_writer "destination" @@ fun () ->
@@ -2745,11 +2921,14 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                                   [],
                                   [ LitPat (Var (loc, "__result")) ],
                                   Static ),
-                              [ assignment (Ast.Var (loc, "__result")) ] );
+                              [ assignment (Ast.Var (loc, "__result")) ] @
+                              (match callback_cleanup with Some s -> [s] | None -> []) );
                           Ast.SwitchStmtClause
                             ( loc,
                               CallExpr (loc, "unwinding", [], [], [], Static),
-                              unwind_stmts );
+                              (match callback_cleanup with
+                               | None -> unwind_stmts
+                               | Some s -> [s; Ast.GotoStmt (loc, State.callback_unwind_label)]) );
                         ] )
             in
             Ok
@@ -2795,6 +2974,8 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                  ]),
               targets @ unwind_targets )
       in
+      let full_call_stmts = !State.pending_hrtb_projection_eq @ full_call_stmts in
+      State.pending_hrtb_projection_eq := [];
       Ok (full_call_stmts, terminator, targets)
 
     let translate_sw_int (sw_int_data_cpn : SwitchIntDataRd.t) (loc : Ast.loc) =
@@ -3236,8 +3417,22 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
           let place_cpn = place_get ref_data_cpn in
           let place_does_not_need_drop = place_does_not_need_drop_get ref_data_cpn in
           let* place_expr, place_is_mutable = translate_place place_cpn loc in
+          let place_ty = decode_ty (D.decode_ty (place_ty_get ref_data_cpn)) in
+          let place_kind =
+            VfMirRd.PlaceKind.get (VfMirRd.Place.kind_get place_cpn)
+          in
+          (* Opt-in tracked ManuallyDrop shared reference; no resource creation. *)
+          let track_manually_drop_shared_ref =
+            match place_ty, bor_kind, place_kind with
+            | `Adt (("core::mem::ManuallyDrop" | "std::mem::ManuallyDrop"),
+                    _, [ `Type _ ]), Shared, Other
+              when not place_is_mutable && place_does_not_need_drop -> true
+            | _ -> false
+          in
           let (path, line, _), _ = Ast.lexed_loc loc in
           let ignore_ref_creation =
+            if track_manually_drop_shared_ref then false
+            else
             bor_kind = Mut
             ||
             not place_is_mutable && place_does_not_need_drop
@@ -3270,13 +3465,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
           if ignore_ref_creation then
             Ok (`TrRvalueExpr (Ast.AddressOf (loc, place_expr)))
           else
-            let place_ty =
-              decode_ty (D.decode_ty (place_ty_get ref_data_cpn))
-            in
             let is_implicit = is_implicit_get ref_data_cpn in
-            let place_kind =
-              VfMirRd.PlaceKind.get (VfMirRd.Place.kind_get place_cpn)
-            in
             (*
             Printf.printf "ref creation at %s: place_ty=%s, bor_kind=%s, place_kind=%s, is_implicit=%b\n"
               (Ast.string_of_loc loc)
@@ -3445,7 +3634,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
       | Undefined _ -> Error (`TrRvalue "Unknown Rvalue kind")
 
     let translate_statement_kind (statement_kind_cpn : StatementKindRd.t)
-        (loc : Ast.loc) =
+        (loc : Ast.loc) (mir_loc : Ast.loc) =
       let open StatementKindRd in
       match get statement_kind_cpn with
       | Assign assign_data_cpn -> (
@@ -3598,17 +3787,19 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
               Ok (init_stmts_builder (lhs_place, lhs_place_is_mutable)))
       | SetDiscriminant -> failwith "TODO: StatementKind::SetDiscriminant"
       | StorageLive local ->
+          let mir_local_id = LocalDeclIdRd.name_get local in
           let local = translate_local_decl_id local in
           Rocq_writer.rocq_print_application TranslatorArgs.rocq_writer "StorageLive" @@ fun () ->
           Rocq_writer.rocq_print_argument TranslatorArgs.rocq_writer @@ fun () ->
           Rocq_writer.rocq_print_string_literal TranslatorArgs.rocq_writer local;
-          Ok [] (* FIXME https://github.com/verifast/verifast/issues/947 *)
+          Ok [Ast.RustStorageLiveStmt (loc, mir_loc, mir_local_id, local)]
       | StorageDead local ->
+          let mir_local_id = LocalDeclIdRd.name_get local in
           let local = translate_local_decl_id local in
           Rocq_writer.rocq_print_application TranslatorArgs.rocq_writer "StorageDead" @@ fun () ->
           Rocq_writer.rocq_print_argument TranslatorArgs.rocq_writer @@ fun () ->
           Rocq_writer.rocq_print_string_literal TranslatorArgs.rocq_writer local;
-          Ok [] (* FIXME https://github.com/verifast/verifast/issues/947 *)
+          Ok [Ast.RustStorageDeadStmt (loc, mir_loc, mir_local_id, local)]
       | PlaceMention _ -> failwith "TODO: StatementKind::PlaceMention"
       | Assume operand_cpn ->
           let* operand = translate_operand operand_cpn loc in
@@ -3639,6 +3830,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
       let open StatementRd in
       let src_info_cpn = source_info_get statement_cpn in
       let* { Mir.span = loc; Mir.scope } = translate_source_info src_info_cpn in
+      let mir_loc = loc in
       (* Todo @Nima: The following `loc` substitution is due to deal with statements with their location equal to the whole body of the function.
          They prevent us from embedding ghost statements into the MIR statements. The ghost embedding approach should be changed.
          After that this `loc` changing and the `body_imp_loc` in the State are not necessary anymore. *)
@@ -3649,7 +3841,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
         else loc
       in
       let kind_cpn = kind_get statement_cpn in
-      translate_statement_kind kind_cpn loc
+      translate_statement_kind kind_cpn loc mir_loc
 
     let translate_basic_block (ret_place_id : string)
         (bblock_cpn : BasicBlockRd.t) =
@@ -3701,6 +3893,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
     let find_blocks (bblocks : Mir.basic_block list) =
       let open Mir in
       let explicit_block_heads_table = Hashtbl.create 10 in
+      let explicit_block_starts_table = Hashtbl.create 10 in
       let bblocks_table = Hashtbl.create 100 in
       let explicit_block_ends = ref [] in
       let loop_spec_blocks = ref [] in
@@ -3752,7 +3945,8 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                  in
                  Hashtbl.add bblocks_table bb.id fixed_bb;
                  Hashtbl.add bblocks_table id bh;
-                 Hashtbl.add explicit_block_heads_table closeBraceLoc bh
+                 Hashtbl.add explicit_block_heads_table closeBraceLoc bh;
+                 Hashtbl.add explicit_block_starts_table closeBraceLoc bb.id
              | [
               Ast.ExprStmt
                 (CallExpr
@@ -3919,6 +4113,32 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                                   (bb :: path)))))))
       in
       iter [] 0 entry_id;
+      List.iter (fun (close_loc, _) ->
+        let head : Mir.basic_block = Hashtbl.find explicit_block_heads_table close_loc in
+        let entry_id = Hashtbl.find explicit_block_starts_table close_loc in
+        let end_bb : Mir.basic_block =
+          match List.filter (fun (loc, _, _) -> loc = close_loc) !explicit_block_ends with
+          | [(_, _, original)] -> Hashtbl.find bblocks_table original.id
+          | _ -> Ast.static_error close_loc "Expected one callback lifetime end marker" None
+        in
+        let rec scoped_ids (bb : Mir.basic_block) =
+          bb.id :: Util.flatmap scoped_ids bb.children
+        in
+        let ids = scoped_ids head in
+        if not (List.mem end_bb.id ids) ||
+           not (List.mem head.id end_bb.successors) ||
+           not (List.exists (fun id -> id <> head.id && not (List.mem id ids)) end_bb.successors) ||
+           List.exists (fun id -> id <> head.id && List.mem id ids) end_bb.successors then
+          Ast.static_error close_loc "Callback lifetime end must leave its reconstructed prefix" None;
+        Hashtbl.iter (fun _ (bb : Mir.basic_block) ->
+          if not (List.mem bb.id ids) then
+            List.iter (fun successor ->
+              if List.mem successor ids &&
+                 not (bb.id = entry_id && successor = head.id) then
+                Ast.static_error close_loc "A goto enters an ended callback lifetime" None)
+              bb.successors)
+          bblocks_table)
+        State.strict_lft_scope_ends;
       !toplevel_blocks
 
     let rec translate_to_vf_basic_block
@@ -3962,15 +4182,24 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
               let children_stmts =
                 translate_basic_blocks_to_stmts children []
               in
+              let strict_scope_start =
+                match List.assoc_opt closeBraceLoc State.strict_lft_scope_ends with
+                | None -> []
+                | Some name ->
+                    [ Ast.ExprStmt
+                        (Ast.CallExpr
+                           (l, "#strict_lft_binding_scope",
+                            [Ast.IdentTypeExpr (l, None, name)], [], [], Ast.Static)) ]
+              in
               ( external_predecessor_count + internal_predecessor_count,
                 [
                   Ast.BlockStmt
                     ( loc,
                       decls,
-                      Ast.LabelStmt (loc, id)
+                      strict_scope_start @ (Ast.LabelStmt (loc, id)
                       :: (stmts0
                          @ [ Ast.GotoStmt (lg, target) ]
-                         @ children_stmts),
+                         @ children_stmts)),
                       closeBraceLoc,
                       ref [] );
                 ],
@@ -4405,7 +4634,107 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
       ( pre_asn,
         Rust_parser.mk_outcome_post contract_loc post_asn unwind_post_asn )
 
-  let gen_drop_contract adt_defs self_ty self_ty_targs self_lft_args limpl =
+  let drop_effect_name self_ty =
+    let suffix = "CopyOnDrop" in
+    if not (String.ends_with ~suffix self_ty) then None
+    else
+      let prefix_len = String.length self_ty - String.length suffix in
+      if prefix_len = 0 then Some "CopyOnDrop_drop_effect"
+      else if prefix_len >= 2
+          && String.sub self_ty (prefix_len - 2) 2 = "::"
+      then Some (String.sub self_ty 0 prefix_len ^ "CopyOnDrop_drop_effect")
+      else None
+
+  let loc_source_file =
+    let rec aux = function
+      | Ast.Lexed ((path, _, _), _) -> Some path
+      | Ast.MacroExpansion (_, body_loc) -> aux body_loc
+      | Ast.MacroParamExpansion (param_loc, _) -> aux param_loc
+      | Ast.DummyLoc -> None
+    in
+    aux
+
+  let concrete_drop_effect_decl ghost_decl_map adt_defs self_ty self_ty_targs
+      self_lft_args =
+    let open Ast in
+    match drop_effect_name self_ty with
+    | None -> None
+    | Some effect_name ->
+      let candidates = List.filter (fun (name, _) -> name = effect_name) ghost_decl_map in
+      begin match candidates with
+      | [] -> None
+      | _ ->
+        let invalid () =
+          let loc = match candidates with
+            | (_, decl)::_ ->
+              begin match AstAux.decl_loc_name_and_name_setter decl with
+              | Some (loc, _, _) -> loc
+              | None -> Ast.dummy_loc
+              end
+            | [] -> Ast.dummy_loc
+          in
+          static_error loc
+            "Malformed CopyOnDrop_drop_effect opt-in predicate" None
+        in
+        let guard = List.find_opt (fun (adt_def : Mir.adt_def_tr) -> adt_def.name = self_ty) adt_defs in
+        let guard_is_qualified = match guard with
+          | Some ({ loc = guard_loc; tparams = []; lft_params = []; fds_no_zst; def = Struct (_, _, [], Left (_, _, _, _), attrs); _ } : Mir.adt_def_tr) ->
+              let layout_is_exact = match rust_concrete_guard_layout attrs with
+                | Some layout -> layout.source_def_path = self_ty
+                    && layout.target_triple = "x86_64-unknown-linux-gnu"
+                    && layout.pointer_width = 64
+                | None -> false
+              in
+              let fields_are_exact = match fds_no_zst with
+                | [ { name = "src"; ty = { vf_ty = PtrTypeExpr (_, ManifestTypeExpr (_, Int (Unsigned, FixedWidthRank 3))); _ }; _ };
+                    { name = "dst"; ty = { vf_ty = PtrTypeExpr (_, ManifestTypeExpr (_, Int (Unsigned, FixedWidthRank 3))); _ }; _ };
+                    { name = "len"; ty = { vf_ty = ManifestTypeExpr (_, Int (Unsigned, PtrRank)); _ }; _ } ] -> true
+                | _ -> false
+              in
+              layout_is_exact && fields_are_exact
+                && self_ty_targs = [] && self_lft_args = []
+                && loc_source_file guard_loc <> None
+          | _ -> false
+        in
+        if not guard_is_qualified then invalid ();
+        (* The Rust ghost parser intentionally normalizes `*const T` and
+           `*mut T` to the same PtrTypeExpr. Keep the declaration's exact
+           ordered source/destination names and u64 pointee types here; the
+           compiler-qualified guard metadata independently retains the
+           concrete field mutabilities. *)
+        let signature_types_match = function
+          | [ IdentTypeExpr (_, None, "thread_id_t");
+              PtrTypeExpr (_, ManifestTypeExpr (_, Int (Unsigned, FixedWidthRank 3)));
+              PtrTypeExpr (_, ManifestTypeExpr (_, Int (Unsigned, FixedWidthRank 3)));
+              ManifestTypeExpr (_, Int (Unsigned, PtrRank)) ] -> true
+          | _ -> false
+        in
+        let declarations, definitions = List.partition_map (fun (_, decl) ->
+          match decl with
+          | PredFamilyDecl (loc, _, [], 0, types, Some 4, Inductiveness_Inductive) ->
+              Left (loc, types)
+          | PredFamilyInstanceDecl (loc, _, [], [], params, body) ->
+              Right (loc, params, body)
+          | _ -> invalid ()) candidates
+        in
+        begin match declarations, definitions with
+        | [ (decl_loc, declared_types) ], [ (def_loc, params, body) ]
+            when List.length candidates = 2
+                && signature_types_match declared_types
+                && signature_types_match (List.map fst params)
+                && List.map snd params = [ "t"; "src"; "dst"; "len" ] ->
+            let guard_file = match guard with Some adt_def -> loc_source_file adt_def.loc | None -> None in
+            let body_is_nonempty = match body with EmpAsn _ -> false | _ -> true in
+            if not body_is_nonempty || guard_file = None
+                || loc_source_file decl_loc <> guard_file
+                || loc_source_file def_loc <> guard_file
+            then invalid ();
+            Some effect_name
+        | _ -> invalid ()
+        end
+      end
+
+  let gen_drop_contract adt_defs self_ty self_ty_targs self_lft_args drop_effect_opt limpl =
     let outlives_clauses = [] in
     let open Ast in
     let ({ loc = ls; tparams; lft_params; fds_no_zst } : Mir.adt_def_tr) =
@@ -4531,45 +4860,68 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
               not identical to its lifetime parameters is not yet supported",
              None ));
     let tid = Ast.Var (limpl, "_t") in
+    let mk_fields_and_padding_post effect_opt =
+      let padding_post =
+        Ast.CallExpr
+          ( limpl,
+            padding_pred_name self_ty,
+            self_ty_targs,
+            [],
+            [ LitPat (Var (limpl, "self")) ],
+            Static )
+      in
+      let post_tail =
+        match effect_opt with
+        | None -> padding_post
+        | Some effect_name ->
+          Ast.Sep
+            ( limpl,
+              padding_post,
+              Ast.CallExpr
+                ( limpl,
+                  effect_name,
+                  [],
+                  [],
+                  List.map (fun name -> LitPat (Var (limpl, name)))
+                    [ "_t"; "src"; "dst"; "len" ],
+                  PredFamCall ) )
+      in
+      List.fold_right
+        (fun ({ name; ty; loc } : Mir.field_def_tr) asn ->
+          match
+            let ty_interp = ty.interp in
+            let* points_to_asn =
+              ty_interp.points_to tid
+                (Read (loc, Var (loc, "self"), name))
+                (Some name)
+            in
+            let* own_asn = ty_interp.own tid (Var (loc, name)) in
+            Ok
+              (Ast.Sep
+                 (loc, Ast.Sep (loc, points_to_asn, own_asn), asn))
+          with
+          | Ok asn -> asn
+          | Error _ ->
+            raise
+              (Ast.StaticError
+                 ( loc,
+                   "Could not generate drop postcondition conjuncts for this field",
+                   None )))
+        fds_no_zst post_tail
+    in
+    let normal_post_tail = mk_fields_and_padding_post drop_effect_opt in
+    let unwind_post_tail = mk_fields_and_padding_post None in
     let (Some post) =
       AstAux.list_to_sep_conj
         (List.map (fun e -> (limpl, e)) post_lft_tks)
-        (Some
-           (Ast.Sep
-              ( ls,
-                post_na_token,
-                List.fold_right
-                  (fun ({ name; ty; loc } : Mir.field_def_tr) asn ->
-                    match
-                      let ty_interp = ty.interp in
-                      let* points_to_asn =
-                        ty_interp.points_to tid
-                          (Read (loc, Var (loc, "self"), name))
-                          (Some name)
-                      in
-                      let* own_asn = ty_interp.own tid (Var (loc, name)) in
-                      Ok
-                        (Ast.Sep
-                           (loc, Ast.Sep (loc, points_to_asn, own_asn), asn))
-                    with
-                    | Ok asn -> asn
-                    | Error msg ->
-                        raise
-                          (Ast.StaticError
-                             ( loc,
-                               "Could not generate drop postcondition \
-                                conjuncts for this field",
-                               None )))
-                  fds_no_zst
-                  (Ast.CallExpr
-                     ( limpl,
-                       padding_pred_name self_ty,
-                       self_ty_targs,
-                       [],
-                       [ LitPat (Var (limpl, "self")) ],
-                       Static )) )))
+        (Some (Ast.Sep (ls, post_na_token, normal_post_tail)))
     in
-    Ok (pre, Rust_parser.mk_outcome_post limpl post post)
+    let (Some unwind_post) =
+      AstAux.list_to_sep_conj
+        (List.map (fun e -> (limpl, e)) post_lft_tks)
+        (Some (Ast.Sep (ls, post_na_token, unwind_post_tail)))
+    in
+    Ok (pre, Rust_parser.mk_outcome_post limpl post unwind_post)
 
   (** makes the mappings used for substituting the MIR level local declaration ids with names closer to variables surface name *)
   let make_var_id_name_maps (loc : Ast.loc) (vdis : Mir.var_debug_info list) =
@@ -4898,9 +5250,40 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
   let translate_body (body_tr_defs_ctx : body_tr_defs_ctx) (body_cpn : BodyRd.t)
       =
     let open BodyRd in
+    (* This is a source-admission count, not a parser for annotations.  Every
+       occurrence must later be replaced in a parsed ghost expression. *)
+    let stack_addr_spelling = "mir_stack_addr" in
+    let stack_addr_count raw =
+      let width = String.length stack_addr_spelling in
+      let rec count at total =
+        if at + width > String.length raw then total
+        else if String.sub raw at width = stack_addr_spelling then
+          count (at + width) (total + 1)
+        else count (at + 1) total
+      in
+      count 0 0
+    in
     let var_id_trs_map_ref = ref [] in
     let* fn_sig_loc = translate_span_data (fn_sig_span_get body_cpn) in
     let ghost_stmts_cpn = ghost_stmts_get_list body_cpn in
+    let stack_addr_occurrences =
+      List.fold_left
+        (fun total annot -> total + stack_addr_count (AnnotationRd.raw_get annot))
+        0 ghost_stmts_cpn
+    in
+    let reject_stack_addr_in_annotation annot =
+      if stack_addr_count (AnnotationRd.raw_get annot) <> 0 then
+        Ast.static_error fn_sig_loc
+          "mir_stack_addr is allowed only in body ghost statements and loop specifications"
+          None
+    in
+    List.iter
+      (fun block ->
+        reject_stack_addr_in_annotation
+          (BodyRd.GhostDeclBlock.start_get block))
+      (ghost_decl_blocks_get_list body_cpn);
+    List.iter reject_stack_addr_in_annotation
+      (ContractRd.annotations_get_list (contract_get body_cpn));
     let* ghost_stmts = ListAux.try_map translate_ghost_stmt ghost_stmts_cpn in
     let* ghost_stmts =
       ListAux.try_sort LocAux.compare_err_desc
@@ -4914,9 +5297,255 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
       ListAux.try_map translate_ghost_decl_block
         (ghost_decl_blocks_get_list body_cpn)
     in
+    (* This opt-in proof CFG is supplied by three adjacent ghost annotations.
+       The exporter still sees the original Rust body and its original braces. *)
+    let marker_stmt name = function
+      | Ast.PureStmt (_, Ast.ExprStmt (Ast.CallExpr (_, found, [Ast.IdentTypeExpr (_, None, lft)], [], [], Ast.Static)))
+      | Ast.ExprStmt (Ast.CallExpr (_, found, [Ast.IdentTypeExpr (_, None, lft)], [], [], Ast.Static))
+        when found = name && String.length lft > 1 && lft.[0] = '\'' -> Some lft
+      | _ -> None
+    in
+    let block_marker name = function
+      | Ast.PureStmt (l, Ast.BlockStmt (_, [], head :: commands, close, _)) ->
+          (match marker_stmt name head with
+           | Some lft -> Some (l, close, lft, commands)
+           | None -> None)
+      | _ -> None
+    in
+    let marked name = List.filter_map (block_marker name) ghost_stmts in
+    let scope_markers =
+      List.filter_map (fun stmt ->
+        match marker_stmt "callback_scope_end" stmt with
+        | Some lft -> Some (Ast.stmt_loc stmt, lft)
+        | None -> None) ghost_stmts
+    in
+    let callback_close, callback_recover, strict_lft_scope_ends, callback_scope_start =
+      match marked "callback_close", scope_markers, marked "callback_recover" with
+      | [], [], [] -> None, None, [], None
+      | [close_l, close_end, close_lft, close_commands],
+        [(cut_l, cut_lft)],
+        [recover_l, recover_end, recover_lft, recover_commands]
+        when close_lft = cut_lft && cut_lft = recover_lft ->
+          let source_pos l = fst (Ast.lexed_loc l) in
+          if not (source_pos close_l < source_pos cut_l &&
+                  source_pos cut_l < source_pos recover_l) then
+            Ast.static_error cut_l "Callback cleanup markers must be ordered" None;
+          (* Admit only the two-source reference protocol. In particular, a
+             predicate constructor containing the local lifetime in a term
+             must not pass merely because its heap chunk has no type args. *)
+          let ty_t = function
+            | Ast.IdentTypeExpr (_, None, "T") -> true | _ -> false in
+          let ty_lft = function
+            | Ast.IdentTypeExpr (_, None, name) -> name = cut_lft | _ -> false in
+          let ty_ref = function
+            | Ast.RustRefTypeExpr (_, lft, Ast.Shared, elem) ->
+                ty_lft lft && ty_t elem
+            | _ -> false in
+          let var name = function
+            | Ast.Var (_, found) -> found = name | _ -> false in
+          let pat_var name = function
+            | Ast.LitPat e -> var name e | _ -> false in
+          let source name = function
+            | Ast.CastExpr (_, Ast.PtrTypeExpr (_, tp), e) ->
+                ty_t tp && var name e
+            | _ -> false in
+          let pat_source name = function
+            | Ast.LitPat e -> source name e | _ -> false in
+          let fbc name = function
+            | Ast.ExprCallExpr (_, Ast.TypePredExpr (_, tp, "full_borrow_content"),
+                [t; src]) -> ty_t tp && pat_var "t" t && pat_source name src
+            | _ -> false in
+          let pat_fbc name = function
+            | Ast.LitPat e -> fbc name e | _ -> false in
+          let ref_pred name = function
+            | Ast.CallExpr (_, "ref_initialized_", [], [], [p], Ast.Static) ->
+                pat_var name p
+            | _ -> false in
+          let pat_ref_pred name = function
+            | Ast.LitPat e -> ref_pred name e | _ -> false in
+          let int_is wanted = function
+            | Ast.IntLit (_, value, _, _, _) ->
+                Big_int.string_of_big_int value = wanted
+            | _ -> false in
+          let quarter = function
+            | Ast.Operation (_, Ast.Div, [num; den]) ->
+                int_is "1" num && int_is "4" den
+            | _ -> false in
+          let frac name = function
+            | Ast.LitPat e -> var name e | _ -> false in
+          let bad_right_frac = function
+            | Ast.LitPat (Ast.Operation (_, Ast.Add, [lhs; rhs])) ->
+                var "right_ref_frac" lhs && int_is "1" rhs
+            | _ -> false in
+          let call name targs args = function
+            | Ast.ExprStmt (Ast.CallExpr (_, found, found_targs, [], found_args, Ast.Static)) ->
+                found = name && targs found_targs && args found_args
+            | _ -> false in
+          let no_targs = function [] -> true | _ -> false in
+          let only_t = function [tp] -> ty_t tp | _ -> false in
+          let only_lft_t = function [lft; tp] -> ty_lft lft && ty_t tp | _ -> false in
+          let close_full name = call "close_full_borrow_content" only_t
+            (function [t; src] -> pat_var "t" t && pat_source name src | _ -> false) in
+          let borrow name = call "borrow" no_targs
+            (function [k; p] -> pat_var "cmp_k" k && pat_fbc name p | _ -> false) in
+          let share name = call "share_full_borrow" only_t
+            (function [k; t; src] ->
+               pat_var "cmp_k" k && pat_var "t" t && pat_source name src
+             | _ -> false) in
+          let precreate name ref_name = function
+            | Ast.DeclStmt (_, [(_, None, found, Some (Ast.CallExpr
+                (_, "precreate_ref", [], [], [src], Ast.Static)), _)]) ->
+                found = ref_name && pat_source name src
+            | _ -> false in
+          let init_ref ref_name = call "init_ref_share" only_t
+            (function [k; t; p] ->
+               pat_var "cmp_k" k && pat_var "t" t && pat_var ref_name p
+             | _ -> false) in
+          let open_frac ref_name = call "open_frac_borrow" no_targs
+            (function [k; p; Ast.LitPat q] ->
+               pat_var "cmp_k" k && pat_ref_pred ref_name p && quarter q
+             | _ -> false) in
+          let open_ref ref_name frac_name = function
+            | Ast.Open (_, None, "ref_initialized_", [tp], [p], [],
+                Some (Ast.VarPat (_, found))) ->
+                ty_t tp && pat_var ref_name p && found = frac_name
+            | _ -> false in
+          let close_ref ref_name = call "close_ref_own" only_lft_t
+            (function [p] -> pat_var ref_name p | _ -> false) in
+          let close_tuple = function
+            | Ast.Close (_, None, "std_tuple_2__own", [tp1; tp2], [],
+                [t; Ast.LitPat (Ast.CastExpr (_,
+                  Ast.StructTypeExpr (_, Some "std_tuple_2_", None, [], [vp1; vp2]),
+                  Ast.InitializerList (_, [(Some (_, "0"), r0); (Some (_, "1"), r1)])))], None) ->
+                ty_ref tp1 && ty_ref tp2 && ty_ref vp1 && ty_ref vp2 &&
+                pat_var "t" t && var "right_ref" r0 && var "left_ref" r1
+            | _ -> false in
+          let close_initialized ref_name frac_name = function
+            | Ast.Close (_, None, "ref_initialized_", [tp], [p], [],
+                Some coef) ->
+                ty_t tp && pat_var ref_name p && frac frac_name coef
+            | _ -> false in
+          let close_frac ref_name frac_name allow_bad =
+            call "close_frac_borrow" no_targs
+              (function [coef; p] ->
+                 (frac frac_name coef || allow_bad && bad_right_frac coef) &&
+                 pat_ref_pred ref_name p
+               | _ -> false) in
+          let close_shape = function
+            | [c0; f0; c1; f1] ->
+                close_initialized "left_ref" "left_ref_frac" c0 &&
+                close_frac "left_ref" "left_ref_frac" false f0 &&
+                close_initialized "right_ref" "right_ref_frac" c1 &&
+                close_frac "right_ref" "right_ref_frac" true f1
+            | _ -> false in
+          let end_lifetime = call "end_lifetime" no_targs
+            (function [k] -> pat_var "cmp_k" k | _ -> false) in
+          let borrow_end name = call "borrow_end" no_targs
+            (function [k; p] -> pat_var "cmp_k" k && pat_fbc name p | _ -> false) in
+          let open_full name = call "open_full_borrow_content" only_t
+            (function [t; src] -> pat_var "t" t && pat_source name src | _ -> false) in
+          let recover_shape = function
+            | [e; b0; o0; b1; o1] ->
+                end_lifetime e && borrow_end "left_src" b0 &&
+                open_full "left_src" o0 && borrow_end "right_src" b1 &&
+                open_full "right_src" o1
+            | _ -> false in
+          if not (close_shape close_commands && recover_shape recover_commands) then
+            Ast.static_error cut_l "Unsupported callback loan cleanup command sequence" None;
+          let enclosing =
+            List.filter (function
+              | Ast.BlockStmt (start,
+                  [Ast.TypeWithTypeidDecl (_, name,
+                    Ast.CallExpr (_, "typeid_of_lft", [], [], [k], Ast.Static))],
+                  [], original_close, _)
+                when name = cut_lft && source_pos start < source_pos close_l &&
+                     source_pos recover_l < source_pos original_close &&
+                     pat_var "cmp_k" k -> true
+              | _ -> false) ghost_decl_blocks
+          in
+          let binding_start =
+            match enclosing with
+            | [Ast.BlockStmt (start, _, _, _, _)] -> start
+            | _ -> Ast.static_error cut_l "Callback cleanup needs exactly one local let_lft binding" None
+          in
+          let in_scope stmt =
+            let pos = source_pos (Ast.stmt_loc stmt) in
+            source_pos binding_start < pos && pos < source_pos cut_l
+          in
+          let scoped = ghost_stmts |> List.filter in_scope in
+          let pure f = function Ast.PureStmt (_, inner) -> f inner | _ -> false in
+          let expected =
+            ["left full content", pure (close_full "left_src");
+             "left borrow", pure (borrow "left_src");
+             "left share", pure (share "left_src");
+             "right full content", pure (close_full "right_src");
+             "right borrow", pure (borrow "right_src");
+             "right share", pure (share "right_src");
+             "left precreate", pure (precreate "left_src" "left_ref");
+             "left ref share", pure (init_ref "left_ref");
+             "right precreate", pure (precreate "right_src" "right_ref");
+             "right ref share", pure (init_ref "right_ref");
+             "left fraction open", pure (open_frac "left_ref");
+             "left ref initialized open", pure (open_ref "left_ref" "left_ref_frac");
+             "left ref own", pure (close_ref "left_ref");
+             "right fraction open", pure (open_frac "right_ref");
+             "right ref initialized open", pure (open_ref "right_ref" "right_ref_frac");
+             "right ref own", pure (close_ref "right_ref");
+             "tuple own", pure close_tuple;
+             "callback close", (fun stmt -> Ast.stmt_loc stmt = close_l)]
+          in
+          let expected =
+            match List.length scoped with
+            | 18 -> expected
+            | 19 -> expected @ ["escaped ref own control", pure (close_ref "left_ref")]
+            | n -> Ast.static_error cut_l
+                ("Unexpected callback borrow protocol length: " ^ string_of_int n) None
+          in
+          List.iter2 (fun (name, check) stmt ->
+            if not (check stmt) then
+              Ast.static_error (Ast.stmt_loc stmt)
+                ("Unexpected callback borrow protocol command: " ^ name) None)
+            expected scoped;
+          let close_stmt =
+            Ast.PureStmt (close_l,
+              Ast.BlockStmt (close_l, [], close_commands, close_end, ref [])) in
+          let recover_stmt =
+            Ast.PureStmt (recover_l,
+              Ast.BlockStmt (recover_l, [], recover_commands, recover_end, ref [])) in
+          Some (close_l, cut_lft, close_stmt), Some recover_stmt,
+          [(cut_l, cut_lft)], Some binding_start
+      | _ ->
+          let loc = match ghost_stmts with stmt :: _ -> Ast.stmt_loc stmt | [] -> fn_sig_loc in
+          Ast.static_error loc "Incomplete or ambiguous callback cleanup markers" None
+    in
+    let source_pos l = fst (Ast.lexed_loc l) in
+    let ghost_stmts =
+      List.map (fun stmt ->
+        let l = Ast.stmt_loc stmt in
+        match callback_close, callback_recover with
+        | Some (close_l, _, _), Some recover_stmt when l = close_l -> Ast.NoopStmt l
+        | Some _, Some recover_stmt ->
+            (match block_marker "callback_recover" stmt with
+             | Some _ -> recover_stmt
+             | None -> stmt)
+        | _ -> stmt) ghost_stmts
+      |> List.filter (fun stmt ->
+           not (List.exists (fun (cut_l, _) -> Ast.stmt_loc stmt = cut_l)
+                  strict_lft_scope_ends))
+    in
     let ghost_decl_block_start_stmts =
       ghost_decl_blocks
       |> List.map @@ fun (Ast.BlockStmt (l, decls, [], closeBraceLoc, _)) ->
+         let closeBraceLoc =
+           match List.find_opt (fun (cut_l, name) ->
+             List.exists (function
+               | Ast.TypeWithTypeidDecl (_, n, _) -> n = name
+               | _ -> false) decls &&
+             source_pos l < source_pos cut_l && source_pos cut_l < source_pos closeBraceLoc)
+             strict_lft_scope_ends with
+           | Some (cut_l, _) -> cut_l
+           | None -> closeBraceLoc
+         in
          Ast.BlockStmt
            ( l,
              decls,
@@ -4929,13 +5558,30 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
     in
     let ghost_decl_block_end_stmts =
       ghost_decl_blocks
-      |> List.map @@ fun (Ast.BlockStmt (l, decls, [], closeBraceLoc, _)) ->
-         Ast.ExprStmt
-           (CallExpr (closeBraceLoc, "#ghost_decl_block_end", [], [], [], Static))
+      |> Util.flatmap @@ fun (Ast.BlockStmt (l, decls, [], closeBraceLoc, _)) ->
+         let end_stmt at =
+           Ast.ExprStmt (CallExpr (at, "#ghost_decl_block_end", [], [], [], Static)) in
+         match List.find_opt (fun (cut_l, name) ->
+           List.exists (function
+             | Ast.TypeWithTypeidDecl (_, n, _) -> n = name
+             | _ -> false) decls &&
+           source_pos l < source_pos cut_l && source_pos cut_l < source_pos closeBraceLoc)
+           strict_lft_scope_ends with
+         | Some (cut_l, _) -> [end_stmt cut_l; Ast.NoopStmt closeBraceLoc]
+         | None -> [end_stmt closeBraceLoc]
     in
     let* loop_spec_blocks =
       ListAux.try_map translate_loop_spec_block
         (loop_spec_blocks_get_list body_cpn)
+    in
+    let stack_addr_occurrences =
+      stack_addr_occurrences
+      + List.fold_left
+          (fun total block ->
+            total
+            + stack_addr_count
+                (AnnotationRd.raw_get (BodyRd.LoopSpecBlock.start_get block)))
+          0 (loop_spec_blocks_get_list body_cpn)
     in
     let ghost_stmts =
       ghost_decl_block_start_stmts @ ghost_decl_block_end_stmts @ loop_spec_blocks @ ghost_stmts
@@ -4947,6 +5593,10 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
       let ghost_stmts = ghost_stmts
       let body_imp_loc = imp_loc
       let body_tr_defs_ctx = body_tr_defs_ctx
+      let strict_lft_scope_ends = strict_lft_scope_ends
+      let callback_close = callback_close
+      let callback_recover = callback_recover
+      let callback_scope_start = callback_scope_start
     end) in
     let vdis_cpn = var_debug_info_get_list body_cpn in
     (* Since var id translation map is empty var debug info contains the plain Mir ids *)
@@ -5004,6 +5654,42 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
           |> List.map D.decode_clause
           |> List.map decode_clause
         in
+        let hrtb_fnmut_output_bounds =
+          clauses
+          |> Util.flatmap (function
+               | `Projection proj_pred ->
+                   let bound_regions = proj_pred.D.bound_regions in
+                   let args =
+                     List.map decode_generic_arg proj_pred.projection_term.args
+                   in
+                   (match (bound_regions, args, proj_pred.term) with
+                   | ( [ r1; r2 ],
+                       [ `Type (`Param f);
+                         `Type
+                           (`Tuple
+                             [ `Ref (arg_r1, false, `Param t1);
+                               `Ref (arg_r2, false, `Param t2) ]) ],
+                       Ty rhs )
+                     when r1 <> r2 && r1 = arg_r1 && r2 = arg_r2 &&
+                          t1 = t2 && decode_ty rhs = `Bool &&
+                          canonicalize_item_name
+                            proj_pred.projection_term.def_id
+                          = "std::ops::FnOnce::Output" &&
+                          List.exists
+                            (function
+                              | `Trait (name, trait_args) ->
+                                  canonicalize_item_name name = "std::ops::FnMut" &&
+                                  trait_args = args
+                              | _ -> false)
+                            clauses ->
+                       Printf.eprintf
+                         "MERGE_HRTB_BOUND function=%s F=%s T=%s regions=%s,%s output=bool\n%!"
+                         name f t1 r1 r2;
+                       [ (f, t1) ]
+                   | _ -> [])
+               | _ -> [])
+        in
+        State.hrtb_fnmut_output_bounds := hrtb_fnmut_output_bounds;
         let sized_tparams = compute_sized_tparams clauses in
         let vf_tparams_with_bounds = vf_tparams |> List.map (fun x -> (x, {Ast.sized = List.mem x sized_tparams})) in
         let projection_clauses =
@@ -5052,6 +5738,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                 Rocq_writer.rocq_print_big_list_element Args.rocq_writer @@ fun () ->
                   translate_local_decl local_decl_cpn
         in
+        let all_local_decls = local_decls in
         (* There should always be a return place for each function *)
         let (ret_place_decl :: local_decls) = local_decls in
         let* ret_ty_info =
@@ -5136,8 +5823,12 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                       | _ -> [])
                     self_gen_args
                 in
+                let drop_effect_opt =
+                  concrete_drop_effect_decl body_tr_defs_ctx.ghost_decl_map
+                    body_tr_defs_ctx.adt_defs self_ty self_ty_targs self_lft_args
+                in
                 gen_drop_contract body_tr_defs_ctx.adt_defs self_ty
-                  self_ty_targs self_lft_args fn_sig_loc
+                  self_ty_targs self_lft_args drop_effect_opt fn_sig_loc
               else
                 gen_contract body_tr_defs_ctx.adt_defs fn_sig_loc
                   lft_param_names outlives_clauses send_tparams sync_tparams
@@ -5183,6 +5874,9 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
               (*overrides*) [] )
         in
         let contract, assume_false = contract in
+        if assume_false && stack_addr_occurrences <> 0 then
+          Ast.static_error fn_sig_loc
+            "mir_stack_addr is not admitted in an assumed-false body" None;
         let* body =
           if assume_false then
             Ok
@@ -5202,6 +5896,191 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                       ],
                       closing_cbrace_loc )))
           else
+            let rewritten_stack_addrs = ref 0 in
+            let resolve_stack_addr use_loc n =
+              let raw_id = "_" ^ string_of_int n in
+              let matches =
+                List.mapi
+                  (fun index decl_cpn ->
+                    (index, LocalDeclIdRd.name_get
+                              (LocalDeclRd.id_get decl_cpn)))
+                  local_decls_cpn
+                |> List.filter (fun (_, found) -> found = raw_id)
+              in
+              let fail reason =
+                Ast.static_error use_loc
+                  (Printf.sprintf "mir_stack_addr(%d): %s" n reason) None
+              in
+              let index =
+                match matches with
+                | [(index, _)] when index = n && index > arg_count -> index
+                | [(index, _)] when index <= arg_count ->
+                    fail "return place and parameters are forbidden"
+                | [(index, _)] -> fail "raw MIR local ID does not match its declaration index"
+                | [] -> fail "raw MIR local ID is absent"
+                | _ -> fail "raw MIR local ID is duplicated"
+              in
+              let decl = List.nth all_local_decls index in
+              let ({ Mir.id = vf_name; ty = (lazy ty_info); loc = decl_loc; _ }
+                    : Mir.local_decl) = decl in
+              if List.exists
+                   (fun ({ id; _ } : var_id_trs_entry) ->
+                     id = TrName.tag_internal raw_id)
+                   trs_map
+              then fail "local has a source/debug name";
+              if vf_name <> TrName.tag_internal raw_id then
+                fail "translated local name is not the hidden MIR name";
+              if List.length
+                   (List.filter
+                      (fun ({ Mir.id; _ } : Mir.local_decl) -> id = vf_name)
+                      all_local_decls)
+                 <> 1
+              then fail "translated local name is not unique";
+              let rec type_description = function
+                | Ast.StructTypeExpr (_, Some name, None, [], args) ->
+                    name ^ "<" ^ String.concat "," (List.map type_description args) ^ ">"
+                | Ast.PtrTypeExpr (_, ty) -> "*" ^ type_description ty
+                | Ast.IdentTypeExpr (_, None, name) -> name
+                | Ast.ManifestTypeExpr (_, Ast.Int (Ast.Unsigned, Ast.PtrRank)) ->
+                    "usize"
+                | _ -> fail "struct type contains an unsupported argument shape"
+              in
+              let type_name =
+                match ty_info.vf_ty with
+                | Ast.StructTypeExpr (_, Some _, None, [], _) as ty ->
+                    type_description ty
+                | _ -> fail "local is not a stock materialized struct"
+              in
+              Printf.eprintf
+                "mir_stack_addr certificate: MIR=%s VF=%s type=%s decl=%s use=%s\n%!"
+                raw_id vf_name type_name (Ast.string_of_loc decl_loc)
+                (Ast.string_of_loc use_loc);
+              Ast.AddressOf (use_loc, Ast.Var (use_loc, vf_name))
+            in
+            let rec rewrite_pat = function
+              | Ast.LitPat expr -> Ast.LitPat (rewrite_expr expr)
+              | Ast.CtorPat (loc, name, pats) ->
+                  Ast.CtorPat (loc, name, List.map rewrite_pat pats)
+              | pat -> pat
+            and rewrite_expr = function
+              | Ast.CallExpr (loc, "mir_stack_addr", [], [],
+                    [Ast.LitPat (Ast.IntLit (_, value, true, false,
+                       Ast.NoLSuffix))], Ast.Static) ->
+                  let spelling = Big_int.string_of_big_int value in
+                  let n = int_of_string_opt spelling in
+                  let n = match n with
+                    | Some n when n > 0 && string_of_int n = spelling -> n
+                    | _ -> Ast.static_error loc
+                        "mir_stack_addr requires one positive decimal MIR local ID"
+                        None
+                  in
+                  incr rewritten_stack_addrs;
+                  resolve_stack_addr loc n
+              | Ast.CallExpr (loc, "mir_stack_addr", _, _, _, _) ->
+                  Ast.static_error loc
+                    "mir_stack_addr requires exactly one unsuffixed decimal literal, no type arguments or indices"
+                    None
+              | Ast.Operation (loc, op, exprs) ->
+                  Ast.Operation (loc, op, List.map rewrite_expr exprs)
+              | Ast.CallExpr (loc, name, targs, indices, args, binding) ->
+                  Ast.CallExpr (loc, name, targs, List.map rewrite_pat indices,
+                    List.map rewrite_pat args, binding)
+              | Ast.ExprCallExpr (loc, callee, args) ->
+                  Ast.ExprCallExpr
+                    (loc, rewrite_expr callee, List.map rewrite_pat args)
+              | Ast.PredAsn (loc, name, targs, indices, args, binding) ->
+                  Ast.PredAsn (loc, name, targs, List.map rewrite_pat indices,
+                    List.map rewrite_pat args, binding)
+              | Ast.PredExprAsn (loc, pred, args) ->
+                  Ast.PredExprAsn
+                    (loc, rewrite_expr pred, List.map rewrite_pat args)
+              | Ast.PointsTo (loc, addr, kind, value) ->
+                  Ast.PointsTo
+                    (loc, rewrite_expr addr, kind, rewrite_pat value)
+              | Ast.Sep (loc, left, right) ->
+                  Ast.Sep (loc, rewrite_expr left, rewrite_expr right)
+              | Ast.IfAsn (loc, cond, left, right) ->
+                  Ast.IfAsn
+                    (loc, rewrite_expr cond, rewrite_expr left,
+                     rewrite_expr right)
+              | Ast.CoefAsn (loc, coef, asn) ->
+                  Ast.CoefAsn (loc, rewrite_pat coef, rewrite_expr asn)
+              | Ast.ExprAsn (loc, expr) ->
+                  Ast.ExprAsn (loc, rewrite_expr expr)
+              | Ast.ForallAsn (loc, ty, name, expr) ->
+                  Ast.ForallAsn (loc, ty, name, rewrite_expr expr)
+              | Ast.EnsuresAsn (loc, name, asn) ->
+                  Ast.EnsuresAsn (loc, name, rewrite_expr asn)
+              | Ast.MatchAsn (loc, expr, pat) ->
+                  Ast.MatchAsn
+                    (loc, rewrite_expr expr, rewrite_pat pat)
+              | Ast.AddressOf (loc, expr) ->
+                  Ast.AddressOf (loc, rewrite_expr expr)
+              | Ast.Deref (loc, expr) ->
+                  Ast.Deref (loc, rewrite_expr expr)
+              | Ast.Select (loc, expr, field) ->
+                  Ast.Select (loc, rewrite_expr expr, field)
+              | Ast.Read (loc, expr, field) ->
+                  Ast.Read (loc, rewrite_expr expr, field)
+              | Ast.CastExpr (loc, ty, expr) ->
+                  Ast.CastExpr (loc, ty, rewrite_expr expr)
+              | Ast.ReadArray (loc, array, index) ->
+                  Ast.ReadArray
+                    (loc, rewrite_expr array, rewrite_expr index)
+              | Ast.IfExpr (loc, cond, yes, no) ->
+                  Ast.IfExpr
+                    (loc, rewrite_expr cond, rewrite_expr yes,
+                     rewrite_expr no)
+              | Ast.InitializerList (loc, fields) ->
+                  Ast.InitializerList
+                    (loc, List.map (fun (field, expr) ->
+                      (field, rewrite_expr expr)) fields)
+              | Ast.Typeid (loc, expr) ->
+                  Ast.Typeid (loc, rewrite_expr expr)
+              | expr -> expr
+            in
+            let rec rewrite_stmt = function
+              | Ast.PureStmt (loc, stmt) ->
+                  Ast.PureStmt (loc, rewrite_stmt stmt)
+              | Ast.BlockStmt (loc, decls, stmts, close, addresses) ->
+                  Ast.BlockStmt
+                    (loc, decls, List.map rewrite_stmt stmts, close, addresses)
+              | Ast.InvariantStmt (loc, asn) ->
+                  Ast.InvariantStmt (loc, rewrite_expr asn)
+              | Ast.Assert (loc, asn) ->
+                  Ast.Assert (loc, rewrite_expr asn)
+              | Ast.Leak (loc, asn) ->
+                  Ast.Leak (loc, rewrite_expr asn)
+              | Ast.SpecStmt (loc, pre, post) ->
+                  Ast.SpecStmt
+                    (loc, rewrite_expr pre, rewrite_expr post)
+              | Ast.ExprStmt expr ->
+                  Ast.ExprStmt (rewrite_expr expr)
+              | Ast.DeclStmt (loc, decls) ->
+                  Ast.DeclStmt (loc, List.map
+                    (fun (at, ty, name, init, refs) ->
+                      (at, ty, name, Option.map rewrite_expr init, refs)) decls)
+              | Ast.Open (loc, target, name, targs, indices, args, coef) ->
+                  Ast.Open
+                    (loc, Option.map rewrite_expr target, name, targs,
+                     List.map rewrite_pat indices, List.map rewrite_pat args,
+                     Option.map rewrite_pat coef)
+              | Ast.Close (loc, target, name, targs, indices, args, coef) ->
+                  Ast.Close
+                    (loc, Option.map rewrite_expr target, name, targs,
+                     List.map rewrite_pat indices, List.map rewrite_pat args,
+                     Option.map rewrite_pat coef)
+              | Ast.IfStmt (loc, cond, yes, no) ->
+                  Ast.IfStmt
+                    (loc, rewrite_expr cond, List.map rewrite_stmt yes,
+                     List.map rewrite_stmt no)
+              | stmt -> stmt
+            in
+            State.ghost_stmts := List.map rewrite_stmt !State.ghost_stmts;
+            if !rewritten_stack_addrs <> stack_addr_occurrences then
+              Ast.static_error fn_sig_loc
+                "mir_stack_addr appears in an unsupported ghost syntax position"
+                None;
             let vf_local_decls =
               List.map (translate_to_vf_local_decl loc) (ret_place_decl :: local_decls)
             in
@@ -5217,6 +6096,24 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
             let toplevel_blocks = find_blocks bblocks in
             let vf_bblocks =
               translate_basic_blocks_to_stmts toplevel_blocks []
+            in
+            let vf_bblocks =
+              match State.callback_close, State.callback_recover, !State.callback_call_loc with
+              | None, None, None -> vf_bblocks
+              | Some _, Some recover, Some call_loc
+                when !State.callback_used && !State.fnmut_call_count = 1 ->
+                  (* Keep the normal return inside its own miniblock.  The
+                     unwind Goto still reaches the outer label through the
+                     stock BlockStmt label continuation. *)
+                  [Ast.BlockStmt
+                     (call_loc, [], vf_bblocks, call_loc, ref [])] @
+                  [ Ast.Assert (call_loc, Ast.False call_loc);
+                    Ast.LabelStmt (call_loc, State.callback_unwind_label);
+                    recover;
+                    Ast.ReturnStmt
+                      (call_loc, Some (Ast.CallExpr
+                        (call_loc, "unwinding", [], [], [], Ast.Static))) ]
+              | _ -> Ast.static_error fn_sig_loc "Callback cleanup marker did not match a call" None
             in
             Ok
               (mk_fn_decl contract
@@ -6175,7 +7072,8 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
     in
     sep loc field_share_asns
 
-  let translate_adt_def (ghost_decl_map : (string * Ast.decl) list)
+  let translate_adt_def target_triple pointer_width
+      (ghost_decl_map : (string * Ast.decl) list)
       (ghost_decls : Ast.decl list) (trait_impls : trait_impl list)
       (adt_def_cpn : AdtDefRd.t) =
     let open AdtDefRd in
@@ -6267,6 +7165,46 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
             let [ variant_def_no_zst ] = variants_no_zst in
             let fds_no_zst = variant_def_no_zst.fields in
             let field_defs_no_zst = List.map translate_to_vf_field_def fds_no_zst in
+            let concrete_guard_attrs =
+              if not (has_concrete_guard_layout_get adt_def_cpn) then []
+              else begin
+                let concrete_guard_def_path = concrete_guard_def_path_get adt_def_cpn in
+                let source_def_path_hash = concrete_guard_def_path_hash_get adt_def_cpn in
+                let size_bytes = Stdint.Uint64.to_string (concrete_guard_size_bytes_get adt_def_cpn) in
+                let align_bytes = Stdint.Uint64.to_string (concrete_guard_align_bytes_get adt_def_cpn) in
+                let field_offsets =
+                  concrete_guard_field_offsets_get_list adt_def_cpn
+                in
+                let field_sizes =
+                  concrete_guard_field_sizes_get_list adt_def_cpn
+                in
+                let exact_field_shape = match fds with
+                  | [ { Mir.name = "src"; ty = { vf_ty = Ast.PtrTypeExpr (_, Ast.ManifestTypeExpr (_, Ast.Int (Unsigned, FixedWidthRank 3))); _ }; _ };
+                      { Mir.name = "dst"; ty = { vf_ty = Ast.PtrTypeExpr (_, Ast.ManifestTypeExpr (_, Ast.Int (Unsigned, FixedWidthRank 3))); _ }; _ };
+                      { Mir.name = "len"; ty = { vf_ty = Ast.ManifestTypeExpr (_, Ast.Int (Unsigned, PtrRank)); _ }; _ } ] -> true
+                  | _ -> false
+                in
+                if concrete_guard_def_path <> def_path
+                    || target_triple <> "x86_64-unknown-linux-gnu" || pointer_width <> 64
+                    || vf_tparams <> [] || not exact_field_shape
+                    || List.length field_offsets <> 3 || List.length field_sizes <> 3
+                    || String.length source_def_path_hash = 0
+                then
+                  Ast.static_error def_loc
+                    "Compiler concrete guard layout does not match the qualified u64 guard shape"
+                    None;
+                [Ast.RustConcreteGuardLayout {
+                  source_def_path = concrete_guard_def_path;
+                  source_def_path_hash;
+                  target_triple;
+                  pointer_width;
+                  size_bytes;
+                  align_bytes;
+                  field_offsets;
+                  field_sizes;
+                }]
+              end
+            in
             let struct_decl =
               Ast.Struct
                 ( def_loc,
@@ -6278,7 +7216,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                       (*instance_pred_decl list*) [],
                       (*is polymorphic*) false ),
                   (*struct_attr list*)
-                  if is_repr_c_get adt_def_cpn then [ ReprC ] else [] )
+                  (if is_repr_c_get adt_def_cpn then [ Ast.ReprC ] else []) @ concrete_guard_attrs )
             in
             let struct_typedef_aux =
               Ast.TypedefDecl
@@ -8042,11 +8980,13 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
         in
         iter (Hashtbl.find_all fn_specialisations_table trait_fn)
       in
+      let target_triple = VfMirRd.VfMir.target_triple_get vf_mir_cpn in
+      let pointer_width = VfMirRd.VfMir.pointer_width_get vf_mir_cpn in
       let adt_defs_cpn = VfMirRd.VfMir.adt_defs_get vf_mir_cpn in
       let* adt_defs_cpn = CapnpAux.ind_list_get_list adt_defs_cpn in
       let* adt_defs =
         ListAux.try_map
-          (translate_adt_def ghost_decl_map ghost_decls trait_impls)
+          (translate_adt_def target_triple pointer_width ghost_decl_map ghost_decls trait_impls)
           adt_defs_cpn
       in
       let adt_defs = List.filter_map Fun.id adt_defs in
@@ -8107,7 +9047,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
         else bodies_cpn
       in
       let body_tr_defs_ctx =
-        { adt_defs; directives = vf_mir_translator_directives; fn_specializer }
+        { adt_defs; ghost_decl_map; directives = vf_mir_translator_directives; fn_specializer }
       in
       let* bodies_tr_res =
         Rocq_writer.rocq_print Args.rocq_writer "Definition bodies := ";

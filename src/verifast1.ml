@@ -6496,6 +6496,8 @@ module VerifyProgram1(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
 
   let alignof_core l env t = mk_alignof (typeid_of_core l env t)
 
+  let rust_guard_layout_type_names = ref []
+
   let () = List.combine structmap1 structdeclmap |> List.iter begin fun ((sn, (l, tparams, body_opt, padding_predsym_opt, type_info_func)), (_, (_, _, _, attrs))) ->
     let assume_axiom axiom =
       if tparams = [] then
@@ -6516,7 +6518,83 @@ module VerifyProgram1(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
     in
     let packed = List.mem Packed attrs in
     let repr_c = dialect <> Some Rust || List.mem ReprC attrs in
-    assume_axiom (fun _ _ s -> (sn ^ "_size_limits", s, ctxt#mk_and (ctxt#mk_lt (ctxt#mk_intlit 0) s) (ctxt#mk_le s max_uintptr_term)));
+    (* Rust admits zero-sized structs.  The canonical empty tuple declaration
+       is supplied by the Rust prelude; duplicate resolved struct names are
+       rejected when constructing structdeclmap.  Keep one shared sizeof/typeid
+       interpretation for ghost size_of, runtime specs and physical storage. *)
+    assume_axiom (fun _ _ s -> (sn ^ "_size_limits", s,
+      ctxt#mk_and
+        ((if dialect = Some Rust then ctxt#mk_le else ctxt#mk_lt) (ctxt#mk_intlit 0) s)
+        (ctxt#mk_le s max_uintptr_term)));
+    if dialect = Some Rust && sn = "std_tuple_0_" && tparams = [] then begin
+      begin match body_opt with
+        Some ([], [], _) -> ()
+      | _ -> static_error l "The canonical Rust unit declaration must be empty." None
+      end;
+      assume_axiom (fun _ _ s -> (sn ^ "_unit_size", s, ctxt#mk_eq s (ctxt#mk_intlit 0)));
+      let type_info = ctxt#mk_app type_info_func [] in
+      ctxt#assert_term (ctxt#mk_eq (mk_alignof type_info) (ctxt#mk_intlit 1))
+    end;
+    begin match Ast.rust_concrete_guard_layout attrs with
+    | None -> ()
+    | Some layout ->
+      let invalid () = static_error l "Invalid compiler-qualified concrete Rust guard layout metadata." None in
+      let parse_nonnegative s =
+        try
+          let value = big_int_of_string s in
+          if sign_big_int value < 0 || string_of_big_int value <> s then invalid ();
+          value
+        with _ -> invalid ()
+      in
+      if dialect <> Some Rust || tparams <> [] || layout.source_def_path <> sn
+          || layout.target_triple <> "x86_64-unknown-linux-gnu"
+          || layout.pointer_width <> 64 || ptr_width <> LitWidth 3
+          || String.length layout.source_def_path_hash = 0
+          || List.mem Packed attrs || List.mem ReprC attrs
+      then invalid ();
+      let size_z = parse_nonnegative layout.size_bytes in
+      let align_z = parse_nonnegative layout.align_bytes in
+      let offsets_z = List.map parse_nonnegative layout.field_offsets in
+      let field_sizes_z = List.map parse_nonnegative layout.field_sizes in
+      if eq_big_int size_z zero_big_int || eq_big_int align_z zero_big_int
+          || List.length offsets_z <> 3 || List.length field_sizes_z <> 3
+          || List.exists (fun field_size -> eq_big_int field_size zero_big_int) field_sizes_z
+      then invalid ();
+      let fields = match body_opt with Some ([], fields, _) -> fields | _ -> invalid () in
+      let is_u64 = function Int (Unsigned, FixedWidthRank 3) -> true | _ -> false in
+      let exact_field_shape = match fields with
+        | [ ("src", (_, Real, PtrType t_src, Some _, _));
+            ("dst", (_, Real, PtrType t_dst, Some _, _));
+            ("len", (_, Real, Int (Unsigned, PtrRank), Some _, _)) ] ->
+            is_u64 t_src && is_u64 t_dst
+        | _ -> false
+      in
+      if not exact_field_shape then invalid ();
+      let fields_with_offsets = List.combine fields (List.combine offsets_z field_sizes_z) in
+      let ranges = List.map (fun ((_, (_, _, field_ty, Some offset_func, _)), (offset, field_size)) ->
+        let modeled_size = sizeof_core l [] field_ty in
+        let offset_s = string_of_big_int offset in
+        let field_size_s = string_of_big_int field_size in
+        ctxt#assert_term (ctxt#mk_eq modeled_size (ctxt#mk_intlit_of_string field_size_s));
+        let offset_term = ctxt#mk_app offset_func [] in
+        ctxt#assert_term (ctxt#mk_eq offset_term (ctxt#mk_intlit_of_string offset_s));
+        if compare_big_int (add_big_int offset field_size) size_z > 0 then invalid ();
+        offset, add_big_int offset field_size
+      ) fields_with_offsets in
+      let rec check_disjoint = function
+        | [] -> ()
+        | (start, finish)::rest ->
+            if List.exists (fun (other_start, other_finish) ->
+              compare_big_int start other_finish < 0 && compare_big_int other_start finish < 0) rest
+            then invalid ();
+            check_disjoint rest
+      in
+      check_disjoint ranges;
+      let type_info = ctxt#mk_app type_info_func [] in
+      ctxt#assert_term (ctxt#mk_eq (mk_sizeof type_info) (ctxt#mk_intlit_of_string layout.size_bytes));
+      ctxt#assert_term (ctxt#mk_eq (mk_alignof type_info) (ctxt#mk_intlit_of_string layout.align_bytes));
+      rust_guard_layout_type_names := sn :: !rust_guard_layout_type_names
+    end;
     match body_opt with
     | Some (_, fmap, _) ->
       let rec offset_iter fields current is_first =
@@ -6535,6 +6613,11 @@ module VerifyProgram1(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
       offset_iter fmap (fun targs_env -> ctxt#mk_intlit 0) true
     | None -> if packed then static_error l "A struct declaration cannot be packed." None
   end
+
+  let rust_guard_layout_supported tp =
+    match unfold_inferred_type tp with
+    | StructType (sn, []) -> List.mem sn !rust_guard_layout_type_names
+    | _ -> false
 
   let pointer_ctor_symb = lazy_purefuncsymb "pointer_ctor"
   let strip_pointer_metadata_symb = lazy_purefuncsymb "strip_pointer_metadata"

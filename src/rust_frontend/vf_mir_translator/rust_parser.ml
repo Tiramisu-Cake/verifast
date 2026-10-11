@@ -1143,6 +1143,30 @@ and parse_decl = function%parser
     TypedefDecl (l, structTypeExpr, sn, tparams);
     if tparams = [] then
       PredFamilyDecl (l, sn ^ "_own", [], 0, own_paramTypes, None, Inductiveness_Inductive)
+    else if sn = "std_tuple_2_" then
+      (match (tparams, body) with
+      | ( ["T1"; "T2"],
+          Either.Left
+            ( [],
+              [ Field (_, Real, IdentTypeExpr (_, None, "T1"), "0", Instance, Public, false, None);
+                Field (_, Real, IdentTypeExpr (_, None, "T2"), "1", Instance, Public, false, None) ],
+              [], false ) ) ->
+          (* Expand ownership only for the exact two-field tuple in the pinned prelude. *)
+          let field_own type_param field =
+            ExprCallExpr
+              (l, TypePredExpr (l, IdentTypeExpr (l, None, type_param), "own"),
+               [LitPat (Var (l, "_t")); LitPat (Select (l, Var (l, "_v"), field))])
+          in
+          PredCtorDecl
+            (l, sn ^ "_own", tparams, [],
+             [IdentTypeExpr (l, None, "thread_id_t"), "_t"; structTypeExpr, "_v"],
+             None,
+             Sep (l, field_own "T1" "0", field_own "T2" "1"))
+      | _ ->
+          raise
+            (ParseException
+               (l,
+                "std_tuple_2_ ownership expansion requires the pinned two-field tuple shape")))
     else
       Func (l, Fixpoint, func_tparams, Some (PredTypeExpr (l, own_paramTypes, None)), sn ^ "_own", [], false, (None, None), None, false, None, false, []);
     TypePredDef (l, tparams, structTypeExpr, "own", Left (l, sn ^ "_own"));

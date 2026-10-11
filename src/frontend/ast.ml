@@ -765,6 +765,9 @@ and
       loc *
       (loc * type_expr option * string * expr option * (bool ref (* indicates whether address is taken *) * (string * bool (*is_const_var*)) list ref option ref (* pointer to enclosing block's list of variables whose address is taken *))) list
   | ExprStmt of expr
+  (* Internal MIR storage events; source calls cannot construct these. *)
+  | RustStorageLiveStmt of loc * loc (* original MIR span *) * string (* MIR local id *) * string (* translated local *)
+  | RustStorageDeadStmt of loc * loc (* original MIR span *) * string (* MIR local id *) * string (* translated local *)
   | IfStmt of (* if  regel-conditie-branch1-branch2  *)
       loc *
       expr *
@@ -1120,12 +1123,32 @@ and
   struct_attr =
   | Packed
   | ReprC
+  | RustConcreteGuardLayout of rust_concrete_guard_layout
+
+and rust_concrete_guard_layout = {
+  source_def_path: string;
+  source_def_path_hash: string;
+  target_triple: string;
+  pointer_width: int;
+  size_bytes: string;
+  align_bytes: string;
+  field_offsets: string list;
+  field_sizes: string list;
+}
+
 and constant_value = (* ?constant_value *)
   IntConst of big_int
 | BoolConst of bool
 | StringConst of string
 | NullConst
 | GhostConst of expr
+
+let rust_concrete_guard_layout attrs =
+  match List.filter_map (function
+    | RustConcreteGuardLayout layout -> Some layout
+    | Packed | ReprC -> None) attrs with
+  | [layout] -> Some layout
+  | _ -> None
 
 let tparams_with_bounds_expr bounds tparams =
   List.map (fun tpname -> (tpname, bounds)) tparams
@@ -1269,6 +1292,7 @@ let stmt_loc s =
     PureStmt (l, _) -> l
   | NonpureStmt (l, _, _) -> l
   | ExprStmt e -> expr_loc e
+  | RustStorageLiveStmt (l, _, _, _) | RustStorageDeadStmt (l, _, _, _) -> l
   | DeclStmt (l, _) -> l
   | IfStmt (l, _, _, _) -> l
   | SwitchStmt (l, _, _) -> l
@@ -1525,3 +1549,10 @@ let rec make_addr_of (loc: loc) (expr: expr): expr =
     CxxDerivedToBase (d_l, addr_of_e, PtrTypeExpr (d_l, d_t))
   | _ ->
     AddressOf (loc, expr)
+
+(* Reconstruct the record payload when emitting replayable OCaml AST dumps. *)
+let make_rust_concrete_guard_layout (source_def_path, source_def_path_hash, target_triple,
+    pointer_width, size_bytes, align_bytes, field_offsets, field_sizes)
+    : rust_concrete_guard_layout =
+  { source_def_path; source_def_path_hash; target_triple; pointer_width;
+    size_bytes; align_bytes; field_offsets; field_sizes }

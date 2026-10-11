@@ -478,6 +478,7 @@ cd tutorial_solutions
   verifast_both -target 32bit students.c
 cd ..
 cd tests
+  verifast -c rust_storage_marker_name_calls.c
   verifast -c issue974.c
   verifast -c issue766.c
   [ "$(verifast issue739.c)" = $'issue739.c(1,11-13): error: Parse error: Bad fraction literal\n1 | float i = 0e;\n  |           ^^' ]

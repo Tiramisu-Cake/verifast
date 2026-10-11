@@ -188,6 +188,11 @@ mod num {
         //@ req true;
         //@ ens result == (if self < other { 0 } else { self - other });
         //@ on_unwind_ens false;
+
+        fn is_multiple_of(self: usize, rhs: usize) -> bool;
+        //@ req true;
+        //@ ens if rhs == 0 { result == (self == 0) } else { result == (self % rhs == 0) };
+        //@ on_unwind_ens false;
         
     }
     
@@ -295,6 +300,44 @@ mod marker {
 }
 
 mod intrinsics {
+
+    // The Rust pointer wrappers use arith_offset after exact 0/1 count casts
+    // (and wrapping_neg for sub).  These synthetic calls keep the unsigned
+    // boundary explicit before any cast to isize can hide a high-bit count.
+    fn verifast_wrapping_add_const<T>(ptr: *const T, count: usize) -> *const T;
+    //@ req (count == 0 || count == 1) &*& 0 <= (ptr as pointer).address &*& (ptr as pointer).address <= usize::MAX &*& 0 <= std::mem::size_of::<T>() &*& std::mem::size_of::<T>() <= usize::MAX;
+    //@ ens result as pointer == wrapping_pointer_offset(ptr as pointer, count * std::mem::size_of::<T>());
+    //@ on_unwind_ens false;
+
+    fn verifast_wrapping_sub_const<T>(ptr: *const T, count: usize) -> *const T;
+    //@ req (count == 0 || count == 1) &*& 0 <= (ptr as pointer).address &*& (ptr as pointer).address <= usize::MAX &*& 0 <= std::mem::size_of::<T>() &*& std::mem::size_of::<T>() <= usize::MAX;
+    //@ ens result as pointer == wrapping_pointer_offset(ptr as pointer, -count * std::mem::size_of::<T>());
+    //@ on_unwind_ens false;
+
+    fn verifast_wrapping_offset_const<T>(ptr: *const T, count: isize) -> *const T;
+    //@ req -1 <= count &*& count <= 1 &*& 0 <= (ptr as pointer).address &*& (ptr as pointer).address <= usize::MAX &*& 0 <= std::mem::size_of::<T>() &*& std::mem::size_of::<T>() <= usize::MAX;
+    //@ ens result as pointer == wrapping_pointer_offset(ptr as pointer, count * std::mem::size_of::<T>());
+    //@ on_unwind_ens false;
+
+    fn verifast_wrapping_add_mut<T>(ptr: *mut T, count: usize) -> *mut T;
+    //@ req (count == 0 || count == 1) &*& 0 <= (ptr as pointer).address &*& (ptr as pointer).address <= usize::MAX &*& 0 <= std::mem::size_of::<T>() &*& std::mem::size_of::<T>() <= usize::MAX;
+    //@ ens result as pointer == wrapping_pointer_offset(ptr as pointer, count * std::mem::size_of::<T>());
+    //@ on_unwind_ens false;
+
+    fn verifast_wrapping_sub_mut<T>(ptr: *mut T, count: usize) -> *mut T;
+    //@ req (count == 0 || count == 1) &*& 0 <= (ptr as pointer).address &*& (ptr as pointer).address <= usize::MAX &*& 0 <= std::mem::size_of::<T>() &*& std::mem::size_of::<T>() <= usize::MAX;
+    //@ ens result as pointer == wrapping_pointer_offset(ptr as pointer, -count * std::mem::size_of::<T>());
+    //@ on_unwind_ens false;
+
+    fn verifast_wrapping_offset_mut<T>(ptr: *mut T, count: isize) -> *mut T;
+    //@ req -1 <= count &*& count <= 1 &*& 0 <= (ptr as pointer).address &*& (ptr as pointer).address <= usize::MAX &*& 0 <= std::mem::size_of::<T>() &*& std::mem::size_of::<T>() <= usize::MAX;
+    //@ ens result as pointer == wrapping_pointer_offset(ptr as pointer, count * std::mem::size_of::<T>());
+    //@ on_unwind_ens false;
+
+    unsafe fn arith_offset<T>(ptr: *const T, count: isize) -> *const T;
+    //@ req -1 <= count &*& count <= 1 &*& 0 <= (ptr as pointer).address &*& (ptr as pointer).address <= usize::MAX &*& 0 <= std::mem::size_of::<T>() &*& std::mem::size_of::<T>() <= usize::MAX;
+    //@ ens result as pointer == wrapping_pointer_offset(ptr as pointer, count * std::mem::size_of::<T>());
+    //@ on_unwind_ens false;
 
     fn ub_checks() -> bool;
     //@ req true;
@@ -576,6 +619,13 @@ mod ptr {
     unsafe fn copy_nonoverlapping<T>(src: *mut T, dst: *mut T, count: usize);
     //@ req [?f]src[..count] |-> ?vs &*& dst[..count] |-> _;
     //@ ens [f]src[..count] |-> vs &*& dst[..count] |-> vs;
+    //@ on_unwind_ens false;
+    //@ terminates;
+
+    // Synthetic target used only for a source call with literal count 1.
+    unsafe fn merge_copy_nonoverlapping_one<T>(src: *mut T, dst: *mut T, count: usize);
+    //@ req count == 1 && 0 < std::mem::size_of::<T>() &*& 0 < src as usize &*& 0 < dst as usize &*& src as usize % std::mem::align_of::<T>() == 0 &*& dst as usize % std::mem::align_of::<T>() == 0 &*& std::mem::size_of::<T>() <= isize::MAX &*& src as usize <= usize::MAX - std::mem::size_of::<T>() &*& dst as usize <= usize::MAX - std::mem::size_of::<T>() &*& object_pointer_within_limits(src, std::mem::size_of::<T>()) == true &*& object_pointer_within_limits(dst, std::mem::size_of::<T>()) == true &*& (src as usize + std::mem::size_of::<T>() <= dst as usize || dst as usize + std::mem::size_of::<T>() <= src as usize) &*& [?f](*src |-> ?v) &*& *dst |-?-> ?old_dst;
+    //@ ens [f](*src |-> v) &*& *dst |-> v;
     //@ on_unwind_ens false;
     //@ terminates;
     
