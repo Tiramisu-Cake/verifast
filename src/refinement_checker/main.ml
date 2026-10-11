@@ -170,7 +170,7 @@ let check_generated_unit unit_name bodies body =
                          d.is_bare_local && not d.is_replace &&
                          d.place.projection = [])
         (unit_name ^ " caller Drop does not bind the generated body");
-      let guard_locals = List.filter (fun local ->
+      let guard_locals = List.filter (fun (local: Vf_mir_decoder.local_decl) ->
         local.id = d.place.local &&
         local.ty.kind = (match g.receiver_type.kind with
           | Ref {ty; _} -> ty.kind
@@ -190,7 +190,7 @@ let check_generated_layout unit_name vf_mir body =
   require_generated (vf_mir.target_triple = "x86_64-unknown-linux-gnu" &&
                      vf_mir.pointer_width = 64)
     (unit_name ^ " has the wrong target");
-  let guards = List.filter (fun adt ->
+  let guards = List.filter (fun (adt: adt_def) ->
     adt.id.name = g.guard_path && adt.is_local &&
     adt.has_concrete_guard_layout &&
     adt.concrete_guard_def_path = g.guard_path &&
@@ -234,7 +234,7 @@ let check_generated_shape unit_name body =
          self.ty <> input || copied.ty <> input ||
          r.id.name <> "_0" || self.id.name <> "_1" ||
          copied.id.name <> "_2" || result.id.name <> "_3" ||
-         List.map (fun local -> local.mutability) body.local_decls <>
+         List.map (fun (local: local_decl) -> local.mutability) body.local_decls <>
            [Mut; Not; Mut; Mut] then
         bad "has a different signature or local layout";
       begin match input.kind with
@@ -301,10 +301,10 @@ let check_generated_pair body0 body1 =
      g0.receiver_type = g1.receiver_type)
     "original and verified descriptors differ";
   let without_spans (b: body) =
-    let local_decls = List.map (fun d ->
+    let local_decls = List.map (fun (d: local_decl) ->
       {d with source_info={span=Dummy}}) b.local_decls in
-    let basic_blocks = List.map (fun bb ->
-      let statements = List.map (fun s ->
+    let basic_blocks = List.map (fun (bb: basic_block) ->
+      let statements = List.map (fun (s: statement) ->
         {s with source_info={span=Dummy}}) bb.statements in
       let kind = match bb.terminator.kind with
         | Call call ->
