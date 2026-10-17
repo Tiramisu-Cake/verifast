@@ -9,6 +9,16 @@ let verbosity_call = 1
 let verbosity_basic_block = 2
 let verbosity_stmt = 3
 
+(* A deliberately narrow official check for the first actual FnMut call in the
+   source-qualified insert_tail body.  main.ml sets the source-bound target;
+   this refiner receipt is set only after the ordinary callee/argument
+   refinement checks have succeeded at that call. *)
+let first_fnmut_continue_check = ref false
+let first_fnmut_continue_target :
+  (string * ((string * int * int) * (string * int * int)) *
+   ((string * int * int) * (string * int * int))) option ref = ref None
+let first_fnmut_continue_receipt = ref false
+
 exception RefinementCheckFailure of string
 
 let canonicalize_def_path_re = Str.regexp "'[a-zA-Z_][a-zA-Z0-9_]*"
@@ -2358,6 +2368,129 @@ let check_body_refines_body bodies0 bodies1 def_path body0 body1 =
     let {lifetimes=lifetimes0}, {lifetimes=lifetimes1} = iter [] [] [] [] [] [] lft_params0 lft_params1 in
     iter lifetimes0 lifetimes1 [] [] [] [] generics0 generics1
   in
+  let first_target =
+    match !first_fnmut_continue_check, !first_fnmut_continue_target with
+    | false, _ -> None
+    | true, Some (target_path, span0, span1) when target_path = def_path ->
+        Some (span0, span1)
+    | _ -> None
+  in
+  let first_calls body genv =
+    let is_fnmut_call call =
+      match call.func with
+      | Constant {const=Val {ty={kind=FnDef fn}; _}; _} ->
+          String.ends_with ~suffix:"FnMut::call_mut" fn.id.name
+      | _ -> false
+    in
+    body.basic_blocks
+    |> List.filter_map (fun bb ->
+         match bb.terminator.kind with
+         | Call call when is_fnmut_call call ->
+             Some (decode_span bb.terminator.source_info.span, bb, call)
+         | _ -> None)
+    |> List.sort (fun (span0, _, _) (span1, _, _) -> compare span0 span1)
+  in
+  let check_first_target_shape body genv expected_span side =
+    let bad detail = failwith ("First FnMut unwind admission (" ^ side ^ "): " ^ detail) in
+    let is_prefix = body.def_path = "insert_tail_first_callback_prefix" ||
+      String.ends_with ~suffix:"::insert_tail_first_callback_prefix" body.def_path in
+    let generic_params =
+      List.map decode_generic_param_def body.impl_block_generics @
+      List.map decode_hir_generic_param body.hir_generics.params
+    in
+    let non_lifetime_params = List.filter (fun (_, kind) -> kind <> Lifetime) generic_params in
+    let lifetime_params = List.filter (fun (_, kind) -> kind = Lifetime) generic_params in
+    if non_lifetime_params <> ["F", Type] then
+      bad "body must retain exactly the generic comparator F and no const/type parameters";
+    let inputs_are_u64_f = match body.inputs with
+      | [{kind=RawPtr {mutability=Mut; ty={kind=UInt U64}}};
+         {kind=RawPtr {mutability=Mut; ty={kind=UInt U64}}};
+         {kind=Ref {mutability=Mut; ty={kind=Param "F"}; _}}] -> true
+      | _ -> false
+    in
+    let inputs = List.map (decode_ty genv) body.inputs in
+    if not inputs_are_u64_f then bad "insert_tail inputs are not (*mut u64, *mut u64, &mut F)";
+    let input_lifetime = begin match inputs with
+      | [RawPtr (UInt (FixedWidth 3)); RawPtr (UInt (FixedWidth 3)); Ref (Region lifetime, Param "F", Mut)] -> lifetime
+      | _ -> bad "insert_tail must have (*mut u64, *mut u64, &mut F) inputs"
+    end in
+    begin match lifetime_params with
+    | [] -> ()
+    | [(name, Lifetime)] when name = input_lifetime -> ()
+    | _ -> bad "only an implicit lifetime parameter matching the &mut F input region is permitted"
+    end;
+    begin match body.output.kind with
+    | Tuple [] -> ()
+    | _ -> bad "insert_tail must return unit"
+    end;
+    let callbacks = first_calls body genv in
+    let first_span, first_bb, first_call =
+      match callbacks, is_prefix with
+      | [(span, bb, call)], true -> span, bb, call
+      | [(span, bb, call); (late_span, _, late_call)], false ->
+          if compare late_span span <= 0 then bad "late callback is not source ordered after the first";
+          begin match late_call.unwind_action with
+          | Cleanup _ -> ()
+          | _ -> bad "late callback is not a distinct Cleanup edge"
+          end;
+          span, bb, call
+      | _ when is_prefix -> bad "named prefix must contain exactly one FnMut::call_mut"
+      | _ -> bad "full insert_tail must contain exactly two FnMut::call_mut calls"
+    in
+    begin
+        if first_span <> expected_span then bad "selected call is not the first source-ordered FnMut::call_mut";
+        if first_bb.is_cleanup then bad "first call is in a cleanup block";
+        if is_prefix && side = "original" then begin
+          if List.exists (fun bb -> bb.is_cleanup) body.basic_blocks then
+            bad "named callback prefix unexpectedly contains a cleanup block";
+          if List.exists (fun bb -> match bb.terminator.kind with
+            | Drop _ -> true
+            | Call call when first_span <> decode_span bb.terminator.source_info.span ->
+                (match call.unwind_action with Cleanup _ -> true | _ -> false)
+            | _ -> false) body.basic_blocks then
+            bad "named callback prefix unexpectedly contains Drop or Cleanup";
+          if not (List.exists (fun bb -> match bb.terminator.kind with Return -> true | _ -> false) body.basic_blocks) then
+            bad "named callback prefix has no normal Return"
+        end;
+        if List.length first_call.args <> 2 then bad "FnMut::call_mut does not have exactly two MIR operands";
+        let local_type operand =
+          let place = match operand with
+            | Copy ({projection=[]; _} as p) | Move ({projection=[]; _} as p) -> p
+            | _ -> bad "callback operand is not a bare local place"
+          in
+          match List.find_opt (fun (d: local_decl) -> d.id = place.local) body.local_decls with
+          | Some d -> decode_ty genv d.ty
+          | None -> bad "callback operand local is absent"
+        in
+        let receiver_ty, tuple_ty = match first_call.args with
+          | [receiver; tuple] -> local_type receiver, local_type tuple
+          | _ -> assert false
+        in
+        begin match receiver_ty with
+        | Ref (_, Param "F", Mut) -> ()
+        | _ -> bad "first callback receiver is not &mut F"
+        end;
+        begin match tuple_ty with
+        | Tuple [Ref (_, UInt (FixedWidth 3), Not); Ref (_, UInt (FixedWidth 3), Not)] -> ()
+        | _ -> bad "first callback argument is not a pair of shared u64 references"
+        end;
+        if first_call.destination.projection <> [] then
+          bad "first callback result destination is not a bare local";
+        let result_ty = match List.find_opt (fun (d: local_decl) -> d.id = first_call.destination.local) body.local_decls with
+          | Some d -> decode_ty genv d.ty
+          | None -> bad "first callback result local is absent"
+        in
+        if result_ty <> Bool then bad "first callback result is not bool";
+        if side = "original" && first_call.unwind_action <> Continue then
+          bad "original first callback does not unwind with Continue";
+    end
+  in
+  begin match first_target with
+  | None -> ()
+  | Some (span0, span1) ->
+      check_first_target_shape body0 root_genv0 span0 "original";
+      check_first_target_shape body1 root_genv1 span1 "verified"
+  end;
   let clauses0 = body0.clauses in
   let clauses1 = body1.clauses in
   if List.length clauses0 <> List.length clauses1 then failwith "The two functions have a different number of clauses";
@@ -2571,6 +2704,20 @@ let check_body_refines_body bodies0 bodies1 def_path body0 body1 =
           List.combine args0 args1 |> List.iteri (fun i (arg0, arg1) ->
             check_operand_refines_operand (i + 1) i_bb0#genv env0 span0 caller0 arg0 i_bb1#genv env1 span1 caller1 arg1
           );
+          begin match first_target with
+          | Some (selected_span0, selected_span1)
+              when decode_span terminator0.source_info.span = selected_span0 &&
+                   decode_span terminator1.source_info.span = selected_span1 ->
+              if call0.unwind_action <> Continue || call1.unwind_action <> Continue then
+                error (Printf.sprintf
+                  "The source-bound first FnMut::call_mut unwind edge must be Continue on both sides (original: %s, verified: %s)"
+                  (Stringifier.string_of_unwind_action call0.unwind_action)
+                  (Stringifier.string_of_unwind_action call1.unwind_action));
+              if !first_fnmut_continue_receipt then
+                error "The source-bound first FnMut::call_mut edge was checked more than once";
+              first_fnmut_continue_receipt := true
+          | _ -> ()
+          end;
           let dest0 = call0.destination in
           let dest1 = call1.destination in
           begin match call0.target, call1.target with

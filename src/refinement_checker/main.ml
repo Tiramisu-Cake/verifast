@@ -13,6 +13,7 @@ let memoize f =
 
 (** Ignore `/*@~mut@*/` directives *)
 let ignore_directives = ref false
+let check_first_fnmut_continue = ref false
 let push xs_ref x = xs_ref := x :: !xs_ref
 let rustc_args = ref []
 
@@ -24,6 +25,9 @@ let original_path, verified_path =
             (original_path, verified_path)
         | "--ignore-directives" :: args ->
           ignore_directives := true;
+          process_args args
+        | "--check-first-fnmut-continue" :: args ->
+          check_first_fnmut_continue := true;
           process_args args
         | "--verbose" :: value :: args ->
             verbosity :=
@@ -39,12 +43,14 @@ let original_path, verified_path =
     | [ original_path; verified_path ] -> (original_path, verified_path)
     | _ ->
         print_endline
-          "Usage: refinement_checker [--ignore-directives] [--verbose N] [--rustc-args ARGS] [--] <original_path> \
+          "Usage: refinement_checker [--ignore-directives] [--check-first-fnmut-continue] [--verbose N] [--rustc-args ARGS] [--] <original_path> \
            <verified_path>\n\n\
            Checks that each behavior of each function in the original path is \
            also exhibited by the corresponding function in the verified path\n\n
            Options:\n\
-               --ignore-directives     Ignore /*@~mut@*/ directives";
+               --ignore-directives     Ignore /*@~mut@*/ directives\n\
+               --check-first-fnmut-continue\n\
+                                      Check the source-bound first insert_tail FnMut unwind edge";
         exit 1
   in
   process_args (List.tl (Array.to_list Sys.argv))
@@ -347,51 +353,22 @@ let load_span_snippet span =
   let end_offset = line_offsets.(end_line - 1) + end_col in
   String.sub contents start_offset (end_offset - start_offset)
 
-let closure_parent_def_path def_path =
-  (* Find the final : in the def_path *)
-  let last_colon = String.rindex def_path ':' in
-  assert (String.sub def_path (last_colon - 1) 11 = "::{closure#");
-  String.sub def_path 0 (last_colon - 1)
+let fnmut_call_sites (body: body) =
+  body.basic_blocks
+  |> List.filter_map (fun bb ->
+       match bb.terminator.kind with
+       | Call call ->
+           begin match call.func with
+           | Constant {const=Val {ty={kind=FnDef fn}; _}; _}
+               when String.ends_with ~suffix:"FnMut::call_mut" fn.id.name ->
+               Some (decode_span bb.terminator.source_info.span, bb, call)
+           | _ -> None
+           end
+       | _ -> None)
+  |> List.sort (fun (span0, _, _) (span1, _, _) -> compare span0 span1)
 
-let rec bodies_are_identical def_path body0 body1 =
-  body0.def_kind = body1.def_kind &&
-  if body0.def_kind = Closure then
-    let parent_def_path = closure_parent_def_path def_path in
-    match List.assoc_opt parent_def_path original_bodies, List.assoc_opt parent_def_path verified_bodies with
-    | Some parent_body0, Some parent_body1 ->
-      bodies_are_identical parent_def_path parent_body0 parent_body1
-    | _ -> false
-  else
-    not body0.is_from_expansion && not body1.is_from_expansion &&
-    let snippet0 = load_span_snippet (decode_body_span body0) in
-    let snippet1 = load_span_snippet (decode_body_span body1) in
-    snippet0 = snippet1
-
-let wrapper_fn_spans =
-  verified_bodies |> List.map (fun (fn, body) ->
-    if String.ends_with ~suffix:"__VeriFast_wrapper" fn then
-      [decode_body_span body]
-    else []) |> List.flatten
-
-let original_checked_spans = ref []
-let verified_checked_spans = ref wrapper_fn_spans
-
-let check_body_refines_body def_path body verified_body =
-  if body.generated_glue.enabled || verified_body.generated_glue.enabled then begin
-    require_generated (body.generated_glue.enabled && verified_body.generated_glue.enabled)
-      "tag is present on only one side";
-    check_generated_pair body verified_body;
-    check_body_refines_body original_bodies verified_bodies def_path body verified_body
-  end else if bodies_are_identical def_path body verified_body then begin
-    if !verbosity >= verbosity_body then
-      Printf.printf "Function bodies for %s are identical\n" def_path
-  end else (
-    if !verbosity >= verbosity_body then
-      Printf.printf
-        "Function bodies for %s are different; checking refinement...\n" def_path;
-    check_body_refines_body original_bodies verified_bodies def_path body verified_body;
-    push original_checked_spans (decode_body_span body);
-    push verified_checked_spans (decode_body_span verified_body))
+let source_has_def_path_name body name =
+  body.def_path = name || String.ends_with ~suffix:("::" ^ name) body.def_path
 
 let skip_whitespace contents offset =
   let rec skip_whitespace' offset =
@@ -441,6 +418,160 @@ let skip_whitespace contents offset =
       | _ -> offset
   in
   skip_whitespace' offset
+
+
+let require_first_callback_source_shape (body: body) side =
+  let fail detail =
+    failwith ("--check-first-fnmut-continue " ^ side ^ " source admission: " ^ detail)
+  in
+  let ((path, _, _), _) = decode_body_span body in
+  let prefix = source_has_def_path_name body "insert_tail_first_callback_prefix" in
+  if not prefix && not (source_has_def_path_name body "insert_tail") then
+    fail "body path is neither insert_tail nor the named callback prefix";
+  let source = load_span_snippet (decode_body_span body) in
+  let locate token =
+    match Str.search_forward (Str.regexp_string token) source 0 with
+    | offset -> offset
+    | exception Not_found -> fail ("source body is missing " ^ token)
+  in
+  let contains token =
+    match Str.search_forward (Str.regexp_string token) source 0 with
+    | _ -> true
+    | exception Not_found -> false
+  in
+  ignore (locate (if prefix then "fn insert_tail_first_callback_prefix" else "fn insert_tail"));
+  let callback_offset = locate "if !is_less" in
+  let after_callback_head = callback_offset + String.length "if !is_less" in
+  let callback_arg_start = skip_whitespace source after_callback_head in
+  if callback_arg_start >= String.length source || source.[callback_arg_start] <> '(' then
+    fail "first source callback is not the actual is_less invocation";
+  let require_after_cursor token cursor =
+    let cursor = skip_whitespace source cursor in
+    if cursor + String.length token > String.length source ||
+       String.sub source cursor (String.length token) <> token then
+      fail ("first source callback is missing " ^ token);
+    cursor + String.length token
+  in
+  let after_args = require_after_cursor "(" callback_arg_start in
+  let after_tail = require_after_cursor "&*tail" after_args in
+  let after_comma = require_after_cursor "," after_tail in
+  let after_sift = require_after_cursor "&*sift" after_comma in
+  ignore (require_after_cursor ")" after_sift);
+  if prefix then begin
+    ignore (locate "tail.sub(1)");
+    ignore (locate "return;");
+    if contains "tail.read" || contains "CopyOnDrop" then
+      fail "callback prefix includes tail.read or guard construction"
+  end else begin
+    let read_offset = locate "let tmp = ManuallyDrop::new(tail.read())" in
+    let guard_offset = locate "let mut gap_guard = CopyOnDrop" in
+    if not (callback_offset < read_offset && read_offset < guard_offset) then
+      fail "first callback is not before tail.read and guard construction"
+  end;
+  let calls = fnmut_call_sites body in
+  let source_offset_of_span span =
+    let (first_path, first_line, first_col), _ = span in
+    let _, offsets = load_file path in
+    let (body_start_path, body_start_line, body_start_col), _ = decode_body_span body in
+    if first_path <> path || body_start_path <> path ||
+       first_line <= 0 || first_line > Array.length offsets then
+      fail "first callback has no source location in this body";
+    offsets.(first_line - 1) + first_col -
+      (offsets.(body_start_line - 1) + body_start_col)
+  in
+  match calls with
+  | [first_span, _, _] when prefix ->
+      let first_offset = source_offset_of_span first_span in
+      if first_offset < callback_offset || first_offset >= String.length source then
+        fail "callback-prefix MIR call span is not inside the source comparator expression";
+      first_span
+  | (first_span, _, _) :: (late_span, _, _) :: _ when not prefix ->
+      if compare first_span late_span >= 0 then fail "callback MIR order is ambiguous";
+      let first_offset = source_offset_of_span first_span in
+      let read_offset = locate "let tmp = ManuallyDrop::new(tail.read())" in
+      if first_offset < callback_offset || first_offset >= read_offset then
+        fail "first callback call span is not before tail.read";
+      first_span
+  | _ -> fail "body does not contain a unique first and later FnMut::call_mut"
+
+let () =
+  if !check_first_fnmut_continue then begin
+    Refinement_checker.first_fnmut_continue_check := true;
+    let candidates bodies =
+      List.filter (fun (_key, body) ->
+        (source_has_def_path_name body "insert_tail" ||
+         source_has_def_path_name body "insert_tail_first_callback_prefix")) bodies
+    in
+    let original = match candidates original_bodies with
+      | [candidate] -> candidate
+      | _ -> failwith "--check-first-fnmut-continue requires exactly one source-bound insert_tail or named prefix"
+    in
+    let verified = match candidates verified_bodies with
+      | [candidate] -> candidate
+      | _ -> failwith "--check-first-fnmut-continue requires exactly one source-bound verified insert_tail or named prefix"
+    in
+    let key0, body0 = original in
+    let key1, body1 = verified in
+    if key0 <> key1 then failwith "--check-first-fnmut-continue original and verified insert_tail paths differ";
+    (* Each admission below loads the actual file named by that body's MIR
+       span and binds the selected Call span into that same file.  The runner
+       pins the paired source blob; a basename match is not source identity. *)
+    let span0 = require_first_callback_source_shape body0 "original" in
+    let span1 = require_first_callback_source_shape body1 "verified" in
+    Refinement_checker.first_fnmut_continue_target := Some (key0, span0, span1)
+  end
+
+let closure_parent_def_path def_path =
+  (* Find the final : in the def_path *)
+  let last_colon = String.rindex def_path ':' in
+  assert (String.sub def_path (last_colon - 1) 11 = "::{closure#");
+  String.sub def_path 0 (last_colon - 1)
+
+let rec bodies_are_identical def_path body0 body1 =
+  body0.def_kind = body1.def_kind &&
+  if body0.def_kind = Closure then
+    let parent_def_path = closure_parent_def_path def_path in
+    match List.assoc_opt parent_def_path original_bodies, List.assoc_opt parent_def_path verified_bodies with
+    | Some parent_body0, Some parent_body1 ->
+      bodies_are_identical parent_def_path parent_body0 parent_body1
+    | _ -> false
+  else
+    not body0.is_from_expansion && not body1.is_from_expansion &&
+    let snippet0 = load_span_snippet (decode_body_span body0) in
+    let snippet1 = load_span_snippet (decode_body_span body1) in
+    snippet0 = snippet1
+
+let wrapper_fn_spans =
+  verified_bodies |> List.map (fun (fn, body) ->
+    if String.ends_with ~suffix:"__VeriFast_wrapper" fn then
+      [decode_body_span body]
+    else []) |> List.flatten
+
+let original_checked_spans = ref []
+let verified_checked_spans = ref wrapper_fn_spans
+
+let check_body_refines_body def_path body verified_body =
+  let is_first_target =
+    match !Refinement_checker.first_fnmut_continue_target with
+    | Some (target_path, _, _) -> target_path = def_path
+    | None -> false
+  in
+  if body.generated_glue.enabled || verified_body.generated_glue.enabled then begin
+    require_generated (body.generated_glue.enabled && verified_body.generated_glue.enabled)
+      "tag is present on only one side";
+    check_generated_pair body verified_body;
+    check_body_refines_body original_bodies verified_bodies def_path body verified_body
+  end else if not is_first_target && bodies_are_identical def_path body verified_body then begin
+    if !verbosity >= verbosity_body then
+      Printf.printf "Function bodies for %s are identical\n" def_path
+  end else (
+    if !verbosity >= verbosity_body then
+      Printf.printf
+        "Function bodies for %s are different; checking refinement...\n" def_path;
+    check_body_refines_body original_bodies verified_bodies def_path body verified_body;
+    push original_checked_spans (decode_body_span body);
+    push verified_checked_spans (decode_body_span verified_body))
+
 
 let rec skip_whitespace_and_checked_ranges contents offset checked_ranges =
   let offset = skip_whitespace contents offset in
@@ -568,6 +699,18 @@ let () =
   try
     check_bodies ();
     check_modules ();
+    if !check_first_fnmut_continue then begin
+      if not !Refinement_checker.first_fnmut_continue_receipt then
+        failwith "--check-first-fnmut-continue requested but the selected first edge was not checked";
+      let target_name = match !Refinement_checker.first_fnmut_continue_target with
+        | Some (path, _, _) when path = "insert_tail_first_callback_prefix" ||
+                                  String.ends_with ~suffix:"::insert_tail_first_callback_prefix" path ->
+            "insert_tail_first_callback_prefix"
+        | Some _ -> "insert_tail"
+        | None -> failwith "--check-first-fnmut-continue has no admitted source target"
+      in
+      Printf.printf "QUALIFIED_FIRST_FNMUT_CONTINUE_EDGE: source-bound %s first FnMut::call_mut operands refined; original and verified unwind are Continue\n" target_name
+    end;
     Printf.printf "No refinement errors found\n"
   with RefinementCheckFailure msg ->
     print_endline msg;

@@ -1948,6 +1948,20 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
   type var_id_trs_entry = { id : string; internal_name : string }
   type var_id_trs_map = var_id_trs_entry list
 
+  type first_callback_plan = {
+    first_close_loc : Ast.loc;
+    first_scope_end_loc : Ast.loc;
+    first_lft : string;
+    first_close_stmt : Ast.stmt;
+    first_recover_stmt : Ast.stmt;
+  }
+
+  let fresh_first_callback_stmt = function
+    | Ast.PureStmt (loc, Ast.BlockStmt (block_loc, decls, stmts, close_loc, _)) ->
+        Ast.PureStmt (loc,
+          Ast.BlockStmt (block_loc, decls, stmts, close_loc, ref []))
+    | _ -> invalid_arg "First callback command block has the wrong AST shape"
+
   module TranslatorArgs = Args
 
   module TrBody (Args : sig
@@ -1960,8 +1974,11 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
     val callback_close : (Ast.loc * string * Ast.stmt) option
     val callback_recover : Ast.stmt option
     val callback_scope_start : Ast.loc option
+    val first_callback : first_callback_plan option
   end) =
   struct
+    type hrtb_callback_referent = HrtbParam of string | HrtbU64
+
     module State = struct
       let var_id_trs_map_ref = Args.var_id_trs_map_ref
       let ghost_stmts = ref Args.ghost_stmts
@@ -1971,6 +1988,12 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
       let callback_close = Args.callback_close
       let callback_recover = Args.callback_recover
       let callback_scope_start = Args.callback_scope_start
+      let first_callback = Args.first_callback
+      let first_callback_used = ref false
+      let first_callback_call_loc = ref None
+      let first_callback_normal_target = ref None
+      let first_fnmut_calls = ref []
+      let first_callback_unwind_label = "#merge_first_callback_unwind"
       let callback_used = ref false
       let callback_call_loc = ref None
       let fnmut_call_count = ref 0
@@ -1979,7 +2002,8 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
       let translating_selected_resume = ref false
       let generated_glue = Args.body_tr_defs_ctx.generated_glue
       let is_generated_glue = Args.is_generated_glue
-      let hrtb_fnmut_output_bounds : (string * string) list ref = ref []
+      let hrtb_fnmut_output_bounds :
+          (string * hrtb_callback_referent) list ref = ref []
       let pending_hrtb_projection_eq : Ast.stmt list ref = ref []
 
       let fetch_ghost_stmts_before (l : Ast.loc0) =
@@ -2406,46 +2430,92 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
         in
         let projection_equality =
           let open Ast in
+          let callback_referent = function
+            | IdentTypeExpr (_, None, name) -> Some (HrtbParam name)
+            | ManifestTypeExpr (_, Int (Unsigned, FixedWidthRank 3)) ->
+                Some HrtbU64
+            | _ -> None
+          in
+          let tuple_shared_referents = function
+            | StructTypeExpr
+                (_, Some "std_tuple_2_", None, [],
+                 [ RustRefTypeExpr (_, lft1, Shared, t1);
+                   RustRefTypeExpr (_, lft2, Shared, t2) ]) ->
+                (Some lft1, callback_referent t1,
+                 Some lft2, callback_referent t2)
+            | _ -> (None, None, None, None)
+          in
+          let source_ref_lifetime_matches source_lft ghost_lft =
+            match source_lft, ghost_lft with
+            | Some (InferredTypeExpr _), _ -> true
+            | Some (IdentTypeExpr (_, None, source_name)),
+              IdentTypeExpr (_, None, ghost_name) -> source_name = ghost_name
+            | _ -> false
+          in
+          let callback_type_name = function
+            | HrtbParam name -> name
+            | HrtbU64 -> "u64"
+          in
           match (canonicalize_item_name fn_name, substs, targs) with
           | ( "std::ops::FnMut::call_mut",
               [ Mir.GenArgType { vf_ty = IdentTypeExpr (_, None, source_f); _ };
-                Mir.GenArgType
-                  {
-                    vf_ty =
-                      StructTypeExpr
-                        ( _, Some "std_tuple_2_", None, [],
-                          [ RustRefTypeExpr (_, _, Shared, IdentTypeExpr (_, None, source_t1));
-                            RustRefTypeExpr (_, _, Shared, IdentTypeExpr (_, None, source_t2)) ] );
-                    _
-                  };
-                Mir.GenArgLifetime _ ],
+                Mir.GenArgType { vf_ty = source_args_ty; _ };
+                Mir.GenArgLifetime source_method_lft ],
               [ (IdentTypeExpr (_, None, ghost_f) as f_ty);
-                (StructTypeExpr
-                   ( _, Some "std_tuple_2_", None, [],
-                     [ RustRefTypeExpr
-                         (_, IdentTypeExpr (_, None, lft1), Shared, IdentTypeExpr (_, None, ghost_t1));
-                       RustRefTypeExpr
-                         (_, IdentTypeExpr (_, None, lft2), Shared, IdentTypeExpr (_, None, ghost_t2)) ] ) as args_ty);
-                IdentTypeExpr (_, None, method_lft) ] )
-            when source_f = ghost_f && source_t1 = source_t2 &&
-                 source_t1 = ghost_t1 && source_t1 = ghost_t2 &&
-                 lft1 = lft2 && lft1 = method_lft &&
-                 String.length lft1 > 0 && lft1.[0] = '\'' &&
-                 List.filter
-                   (fun (f, t) -> f = source_f && t = source_t1)
-                   !State.hrtb_fnmut_output_bounds
-                 = [ (source_f, source_t1) ] ->
-              Printf.eprintf
-                "MERGE_HRTB_CALL registered=1 function=%s F=%s T=%s lifetime=%s call=%s\n%!"
-                (canonicalize_item_name fn_name) source_f source_t1 lft1
-                (Ast.string_of_loc call_loc);
-              [ ExprStmt
-                  (CallExpr
-                     ( call_loc, "#register_type_projection_equality",
-                       [ ProjectionTypeExpr
-                           (call_loc, f_ty, "std::ops::FnOnce", [ args_ty ], "Output");
-                         ManifestTypeExpr (call_loc, Bool) ],
-                       [], [], Static )) ]
+                (StructTypeExpr (_, Some "std_tuple_2_", None, [],
+                   [ RustRefTypeExpr (_, IdentTypeExpr (_, None, lft1), Shared, ghost_t1);
+                     RustRefTypeExpr (_, IdentTypeExpr (_, None, lft2), Shared, ghost_t2) ]) as args_ty);
+                IdentTypeExpr (_, None, method_lft) ] ) ->
+              let source_lft1, source_t1, source_lft2, source_t2 =
+                tuple_shared_referents source_args_ty
+              in
+              let ghost_t1 = callback_referent ghost_t1 in
+              let ghost_t2 = callback_referent ghost_t2 in
+              let referent =
+                match source_t1, source_t2, ghost_t1, ghost_t2 with
+                | Some source_t1, Some source_t2, Some ghost_t1, Some ghost_t2
+                  when source_t1 = source_t2 && source_t1 = ghost_t1 &&
+                       source_t1 = ghost_t2 -> Some source_t1
+                | _ -> None
+              in
+              let explicit_same_lifetime =
+                lft1 = lft2 && lft1 = method_lft &&
+                String.length lft1 > 0 && lft1.[0] = '\''
+              in
+              let source_lifetimes_match =
+                source_ref_lifetime_matches source_lft1
+                  (IdentTypeExpr (call_loc, None, lft1)) &&
+                source_ref_lifetime_matches source_lft2
+                  (IdentTypeExpr (call_loc, None, lft2))
+              in
+              (match referent with
+               | Some referent
+                 when source_f = ghost_f && explicit_same_lifetime &&
+                      source_lifetimes_match &&
+                      source_method_lft = "'erased" &&
+                      List.filter
+                        (fun (f, t) -> f = source_f && t = referent)
+                        !State.hrtb_fnmut_output_bounds
+                      = [ (source_f, referent) ] ->
+                   Printf.eprintf
+                     "MERGE_HRTB_CALL registered=1 function=%s F=%s T=%s lifetime=%s call=%s\n%!"
+                     (canonicalize_item_name fn_name) source_f
+                     (callback_type_name referent) lft1
+                     (Ast.string_of_loc call_loc);
+                   [ ExprStmt
+                       (CallExpr
+                          ( call_loc, "#register_type_projection_equality",
+                            [ ProjectionTypeExpr
+                                (call_loc, f_ty, "std::ops::FnOnce", [ args_ty ], "Output");
+                              ManifestTypeExpr (call_loc, Bool) ],
+                            [], [], Static )) ]
+               | _ ->
+                   Printf.eprintf
+                     "MERGE_HRTB_CALL registered=0 function=%s source_substs=%d ghost_substs=%d eligible_bounds=%d call=%s\n%!"
+                     (canonicalize_item_name fn_name) (List.length substs)
+                     (List.length targs) (List.length !State.hrtb_fnmut_output_bounds)
+                     (Ast.string_of_loc call_loc);
+                   [])
           | _ ->
               if canonicalize_item_name fn_name = "std::ops::FnMut::call_mut" then
                 Printf.eprintf
@@ -2871,6 +2941,61 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
         if TranslatorArgs.ignore_unwind_paths then ([], [])
         else translate_unwind_action (unwind_action_get fn_call_data_cpn) loc
       in
+      let first_callback_cleanup =
+        match State.first_callback, fn_call_rexpr with
+        | Some plan,
+          FnCallOutcome (Ast.CallExpr (_, name, targs, [], args, Ast.Static))
+          when canonicalize_item_name name = "std::ops::FnMut::call_mut" ->
+            let unwind_kind =
+              match UnwindActionRd.get (unwind_action_get fn_call_data_cpn) with
+              | UnwindActionRd.Continue -> `Continue
+              | UnwindActionRd.Cleanup _ -> `Cleanup
+              | _ -> `Other
+            in
+            State.first_fnmut_calls := (loc, unwind_kind) :: !State.first_fnmut_calls;
+            let (_, call_end_line, _) = snd (Ast.lexed_loc loc) in
+            let ((_, close_line, _), _) = Ast.lexed_loc plan.first_close_loc in
+            if close_line = call_end_line + 1 then (
+              let u64 = function
+                | Ast.ManifestTypeExpr (_, Ast.Int (Ast.Unsigned, Ast.FixedWidthRank 3)) -> true
+                | _ -> false
+              in
+              let typed_call =
+                match targs, args with
+                | [Ast.IdentTypeExpr (_, None, "F");
+                   Ast.StructTypeExpr (_, Some "std_tuple_2_", None, [],
+                     [Ast.RustRefTypeExpr (_, Ast.IdentTypeExpr (_, None, lft1),
+                        Ast.Shared, t1);
+                      Ast.RustRefTypeExpr (_, Ast.IdentTypeExpr (_, None, lft2),
+                        Ast.Shared, t2)]);
+                   Ast.IdentTypeExpr (_, None, lft3)],
+                  [Ast.LitPat (Ast.Var _); Ast.LitPat (Ast.Var _)] ->
+                    lft1 = plan.first_lft && lft2 = plan.first_lft &&
+                    lft3 = plan.first_lft && u64 t1 && u64 t2
+                | _ -> false
+              in
+              let ((call_file, _, _), _) = Ast.lexed_loc loc in
+              if !State.first_callback_used || not typed_call ||
+                 !State.pending_hrtb_projection_eq = [] ||
+                 (let ((marker_file, _, _), _) =
+                    Ast.lexed_loc plan.first_close_loc in
+                  call_file <> marker_file) ||
+                 TranslatorArgs.ignore_unwind_paths ||
+                 (match OptionRd.get (target_get fn_call_data_cpn) with
+                  | Something _ -> false | _ -> true) ||
+                 unwind_kind <> `Continue ||
+                 (match unwind_stmts with
+                  | [Ast.ReturnStmt (_, Some (Ast.CallExpr (_, "unwinding", [], [], [], Ast.Static)))] -> false
+                  | _ -> true) then
+                Ast.static_error loc
+                  "First callback recovery requires the typed source FnMut Continue call"
+                  None;
+              State.first_callback_used := true;
+              State.first_callback_call_loc := Some loc;
+              Some plan.first_close_stmt)
+            else None
+        | _ -> None
+      in
       let callback_cleanup =
         match State.callback_close, fn_call_rexpr with
         | Some (close_loc, lft, close_stmt),
@@ -2964,15 +3089,29 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                                   [ LitPat (Var (loc, "__result")) ],
                                   Static ),
                               [ assignment (Ast.Var (loc, "__result")) ] @
-                              (match callback_cleanup with Some s -> [s] | None -> []) );
+                              (match first_callback_cleanup, callback_cleanup with
+                               | Some s, None | None, Some s ->
+                                   [fresh_first_callback_stmt s]
+                               | None, None -> []
+                               | Some _, Some _ ->
+                                   Ast.static_error loc "Overlapping callback recovery markers" None) );
                           Ast.SwitchStmtClause
                             ( loc,
                               CallExpr (loc, "unwinding", [], [], [], Static),
-                              (match callback_cleanup with
-                               | None -> unwind_stmts
-                               | Some s -> [s; Ast.GotoStmt (loc, State.callback_unwind_label)]) );
+                              (match first_callback_cleanup, callback_cleanup with
+                               | Some s, None ->
+                                   [fresh_first_callback_stmt s;
+                                    Ast.GotoStmt (loc, State.first_callback_unwind_label)]
+                               | None, Some s ->
+                                   [s; Ast.GotoStmt (loc, State.callback_unwind_label)]
+                               | None, None -> unwind_stmts
+                               | Some _, Some _ ->
+                                   Ast.static_error loc "Overlapping callback recovery markers" None) );
                         ] )
             in
+            (match first_callback_cleanup with
+             | Some _ -> State.first_callback_normal_target := Some dst_bblock_id
+             | None -> ());
             Ok
               ( [ call_stmt ],
                 Mir.GotoTerminator (loc, dst_bblock_id),
@@ -5279,14 +5418,14 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
           (outlives_clause_cpn.region1.id, outlives_clause_cpn.region2.id)
     | Trait trait_clause_cpn ->
         let args = trait_clause_cpn.args |> List.map decode_generic_arg in
-        `Trait (trait_clause_cpn.def_id, args)
+        `Trait (trait_clause_cpn.def_id, args, trait_clause_cpn.bound_regions)
     | Projection proj_clause_cpn -> `Projection proj_clause_cpn
     | _ -> `Ignored
 
   let string_of_clause clause =
     match clause with
     | `Outlives (r1, r2) -> Printf.sprintf "%s : %s" r1 r2
-    | `Trait (name, `Type arg :: args) ->
+    | `Trait (name, `Type arg :: args, _) ->
         Printf.sprintf "%s : %s<%s>"
           (string_of_decoded_type arg)
           name
@@ -5299,7 +5438,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
     |> Util.flatmap (function
          | `Trait
              ( ("std::marker::Sized" | "core::marker::Sized"),
-               [ `Type (`Param tparam) ] ) ->
+               [ `Type (`Param tparam) ], _ ) ->
              [ tparam ]
          | _ -> [])
 
@@ -5308,7 +5447,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
     |> Util.flatmap (function
          | `Trait
              ( ("std::marker::Send" | "core::marker::Send"),
-               [ `Type (`Param tparam) ] ) ->
+               [ `Type (`Param tparam) ], _ ) ->
              [ tparam ]
          | _ -> [])
 
@@ -5317,7 +5456,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
     |> Util.flatmap (function
          | `Trait
              ( ("std::marker::Sync" | "core::marker::Sync"),
-               [ `Type (`Param tparam) ] ) ->
+               [ `Type (`Param tparam) ], _ ) ->
              [ tparam ]
          | _ -> [])
 
@@ -5437,6 +5576,190 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
         match marker_stmt "callback_scope_end" stmt with
         | Some lft -> Some (Ast.stmt_loc stmt, lft)
         | None -> None) ghost_stmts
+    in
+    let first_scope_markers =
+      List.filter_map (fun stmt ->
+        match marker_stmt "first_callback_scope_end" stmt with
+        | Some lft -> Some (Ast.stmt_loc stmt, lft)
+        | None -> None) ghost_stmts
+    in
+    let first_callback, first_strict_scope_ends =
+      match marked "first_callback_close", first_scope_markers,
+            marked "first_callback_recover" with
+      | [], [], [] -> None, []
+      | [close_l, close_end, close_lft, close_commands],
+        [(cut_l, cut_lft)],
+        [recover_l, recover_end, recover_lft, recover_commands]
+        when close_lft = cut_lft && cut_lft = recover_lft ->
+          let source_pos l = fst (Ast.lexed_loc l) in
+          let body_name = TrName.translate_def_path (def_path_get body_cpn) in
+          if not (body_name = "insert_tail" ||
+                  String.ends_with ~suffix:"::insert_tail" body_name ||
+                  body_name = "insert_tail_first_callback_prefix" ||
+                  String.ends_with ~suffix:"::insert_tail_first_callback_prefix" body_name) ||
+             not (source_pos close_l < source_pos cut_l &&
+                  source_pos cut_l < source_pos recover_l) ||
+             (let ((_, close_line, _), _) = Ast.lexed_loc close_l in
+              let ((_, cut_line, _), _) = Ast.lexed_loc cut_l in
+              let ((_, recover_line, _), _) = Ast.lexed_loc recover_l in
+              cut_line <> close_line + 1 || recover_line <> cut_line + 1) then
+            Ast.static_error cut_l
+              "First callback markers require the source insert_tail first-call site"
+              None;
+          let var name = function
+            | Ast.Var (_, found) -> found = name | _ -> false in
+          let pvar name = function
+            | Ast.LitPat e -> var name e | _ -> false in
+          let u64 = function
+            | Ast.ManifestTypeExpr (_, Ast.Int (Ast.Unsigned, Ast.FixedWidthRank 3)) -> true
+            | _ -> false in
+          let ref_initialized name = function
+            | Ast.CallExpr (_, "ref_initialized_", [], [], [p], Ast.Static) ->
+                pvar name p
+            | _ -> false in
+          let lifetime_token = function
+            | Ast.CallExpr (_, "lifetime_token", [], [], [p], Ast.Static) ->
+                pvar "cmp_k" p
+            | _ -> false in
+          let token_assert coef = function
+            | Ast.Assert (_, Ast.CoefAsn (_, Ast.LitPat
+                (Ast.Operation (_, Ast.Div, [Ast.IntLit (_, n, _, _, _);
+                                             Ast.IntLit (_, d, _, _, _)])), body)) ->
+                Big_int.string_of_big_int n = "1" &&
+                Big_int.string_of_big_int d = coef && lifetime_token body
+            | Ast.Assert (_, body) when coef = "1" -> lifetime_token body
+            | _ -> false in
+          let close_ref ref_name frac_name = function
+            | Ast.Close (_, None, "ref_initialized_", [tp], [p], [],
+                Some coef) ->
+                u64 tp && pvar ref_name p && pvar frac_name coef
+            | _ -> false in
+          let diagnostic_extra_fraction = function
+            | Ast.LitPat (Ast.Operation (_, Ast.Add,
+                [Ast.Var (_, "tail_ref_frac"); Ast.IntLit (_, n, _, _, _)])) ->
+                Big_int.string_of_big_int n = "1"
+            | _ -> false in
+          let close_frac ref_name frac_name allow_diagnostic = function
+            | Ast.ExprStmt (Ast.CallExpr (_, "close_frac_borrow", [], [],
+                [coef; Ast.LitPat pred], Ast.Static)) ->
+                (pvar frac_name coef ||
+                 allow_diagnostic && diagnostic_extra_fraction coef) &&
+                ref_initialized ref_name pred
+            | _ -> false in
+          let merge_token = function
+            | Ast.MergeFractionsStmt (_, body) -> lifetime_token body
+            | _ -> false in
+          let close_shape = function
+            | [a; b; c; d; e; f] ->
+                close_ref "cmp_tail_ref" "tail_ref_frac" a &&
+                close_frac "cmp_tail_ref" "tail_ref_frac" true b &&
+                close_ref "cmp_sift_ref" "sift_ref_frac" c &&
+                close_frac "cmp_sift_ref" "sift_ref_frac" false d &&
+                merge_token e &&
+                (token_assert "2" f || token_assert "1" f)
+            | _ -> false in
+          let call name targs args = function
+            | Ast.ExprStmt (Ast.CallExpr (_, found, found_targs, [],
+                found_args, Ast.Static)) ->
+                found = name && targs found_targs && args found_args
+            | _ -> false in
+          let no_targs = function [] -> true | _ -> false in
+          let only_u64 = function [tp] -> u64 tp | _ -> false in
+          let full_borrow name = function
+            | Ast.ExprCallExpr (_, Ast.TypePredExpr (_, tp, "full_borrow_content"),
+                [t; ptr]) -> u64 tp && pvar "t" t && pvar name ptr
+            | _ -> false in
+          let end_lifetime = call "end_lifetime" no_targs
+            (function [k] -> pvar "cmp_k" k | _ -> false) in
+          let borrow_end name = call "borrow_end" no_targs
+            (function [k; Ast.LitPat p] ->
+              pvar "cmp_k" k && full_borrow name p | _ -> false) in
+          let open_full name = call "open_full_borrow_content" only_u64
+            (function [t; ptr] -> pvar "t" t && pvar name ptr | _ -> false) in
+          let one = function
+            | Ast.IntLit (_, n, _, _, _) -> Big_int.string_of_big_int n = "1"
+            | _ -> false in
+          let expr_call name args = function
+            | Ast.CallExpr (_, found, [], [], found_args, Ast.Static) ->
+                found = name && args found_args
+            | _ -> false in
+          let drop xs = expr_call "drop"
+            (function [Ast.LitPat n; Ast.LitPat e] ->
+              one n && xs e | _ -> false) in
+          let take xs = expr_call "take"
+            (function [Ast.LitPat n; Ast.LitPat e] ->
+              one n && xs e | _ -> false) in
+          let first_rest = drop (var "xs") in
+          let sift_seq = take first_rest in
+          let tail_seq = drop first_rest in
+          let head seq = expr_call "head"
+            (function [Ast.LitPat e] -> seq e | _ -> false) in
+          let own_pred = function
+            | Ast.CallExpr (_, "own", [tp], [], [t], Ast.Static) ->
+                u64 tp && pvar "t" t
+            | _ -> false in
+          let close_own seq = function
+            | Ast.Close (_, None, "own", [tp], [t], [Ast.LitPat e], None) ->
+                u64 tp && pvar "t" t && head seq e
+            | _ -> false in
+          let close_foreach seq = function
+            | Ast.Close (_, None, "foreach", [], [],
+                [Ast.LitPat elems; Ast.LitPat own], None) ->
+                seq elems && own_pred own
+            | _ -> false in
+          let close_array ptr seq = function
+            | Ast.Close (_, None, "array", [tp], [],
+                [p; Ast.LitPat len; Ast.LitPat elems], None) ->
+                u64 tp && pvar ptr p && one len && seq elems
+            | _ -> false in
+          let begin_plus_one = function
+            | Ast.Operation (_, Ast.Add, [Ast.Var (_, "begin"); n]) -> one n
+            | _ -> false in
+          let array_join ptr = call "array_join" only_u64
+            (function [Ast.LitPat p] -> ptr p | _ -> false) in
+          let foreach_join seq = call "foreach_join" no_targs
+            (function [Ast.LitPat elems; Ast.LitPat own; Ast.LitPat n] ->
+              seq elems && own_pred own && one n | _ -> false) in
+          let recover_shape = function
+            | [a; b; c; d; e; f; g; h; i; j; k; l; m; n; o; p] ->
+                token_assert "1" a && end_lifetime b &&
+                borrow_end "tail" c && open_full "tail" d &&
+                borrow_end "sift" e && open_full "sift" f &&
+                close_own sift_seq g && close_own tail_seq h &&
+                close_foreach sift_seq i && close_foreach tail_seq j &&
+                close_array "sift" sift_seq k &&
+                close_array "tail" tail_seq l &&
+                array_join begin_plus_one m && array_join (var "begin") n &&
+                foreach_join first_rest o && foreach_join (var "xs") p
+            | _ -> false in
+          if not (close_shape close_commands && recover_shape recover_commands) then
+            Ast.static_error cut_l
+              "Unsupported first callback loan and owner recovery commands"
+              None;
+          let enclosing =
+            List.filter (function
+              | Ast.BlockStmt (start,
+                  [Ast.TypeWithTypeidDecl (_, name,
+                    Ast.CallExpr (_, "typeid_of_lft", [], [], [k], Ast.Static))],
+                  [], original_close, _)
+                when name = cut_lft && source_pos start < source_pos close_l &&
+                     source_pos recover_l < source_pos original_close &&
+                     pvar "cmp_k" k -> true
+              | _ -> false) ghost_decl_blocks in
+          if List.length enclosing <> 1 then
+            Ast.static_error cut_l
+              "First callback recovery needs exactly one local let_lft binding"
+              None;
+          let close_stmt = Ast.PureStmt (close_l,
+            Ast.BlockStmt (close_l, [], close_commands, close_end, ref [])) in
+          let recover_stmt = Ast.PureStmt (recover_l,
+            Ast.BlockStmt (recover_l, [], recover_commands, recover_end, ref [])) in
+          Some {first_close_loc = close_l; first_scope_end_loc = cut_l;
+                first_lft = cut_lft; first_close_stmt = close_stmt;
+                first_recover_stmt = recover_stmt}, [(cut_l, cut_lft)]
+      | _ ->
+          Ast.static_error fn_sig_loc
+            "Incomplete or ambiguous first callback recovery markers" None
     in
     let callback_close, callback_recover, strict_lft_scope_ends, callback_scope_start =
       match marked "callback_close", scope_markers, marked "callback_recover" with
@@ -5637,11 +5960,18 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
           let loc = match ghost_stmts with stmt :: _ -> Ast.stmt_loc stmt | [] -> fn_sig_loc in
           Ast.static_error loc "Incomplete or ambiguous callback cleanup markers" None
     in
+    if first_callback <> None && callback_close <> None then
+      Ast.static_error fn_sig_loc "Overlapping callback recovery protocols" None;
+    let strict_lft_scope_ends = strict_lft_scope_ends @ first_strict_scope_ends in
     let source_pos l = fst (Ast.lexed_loc l) in
     let ghost_stmts =
       List.map (fun stmt ->
         let l = Ast.stmt_loc stmt in
-        match callback_close, callback_recover with
+        if (match first_callback with
+            | Some plan -> l = plan.first_close_loc ||
+                block_marker "first_callback_recover" stmt <> None
+            | None -> false) then Ast.NoopStmt l
+        else match callback_close, callback_recover with
         | Some (close_l, _, _), Some recover_stmt when l = close_l -> Ast.NoopStmt l
         | Some _, Some recover_stmt ->
             (match block_marker "callback_recover" stmt with
@@ -5686,6 +6016,8 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
              | _ -> false) decls &&
            source_pos l < source_pos cut_l && source_pos cut_l < source_pos closeBraceLoc)
            strict_lft_scope_ends with
+         | Some (cut_l, _) when List.mem_assoc cut_l first_strict_scope_ends ->
+             [Ast.NoopStmt closeBraceLoc]
          | Some (cut_l, _) -> [end_stmt cut_l; Ast.NoopStmt closeBraceLoc]
          | None -> [end_stmt closeBraceLoc]
     in
@@ -5717,6 +6049,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
       let callback_close = callback_close
       let callback_recover = callback_recover
       let callback_scope_start = callback_scope_start
+      let first_callback = first_callback
     end) in
     let vdis_cpn = var_debug_info_get_list body_cpn in
     (* Since var id translation map is empty var debug info contains the plain Mir ids *)
@@ -5965,30 +6298,47 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                    let args =
                      List.map decode_generic_arg proj_pred.projection_term.args
                    in
+                   let callback_referent = function
+                     | `Param name -> Some (HrtbParam name)
+                     | `Uint D.U64 -> Some HrtbU64
+                     | _ -> None
+                   in
+                   let matching_fnmut_bounds =
+                     clauses
+                     |> Util.flatmap (function
+                          | `Trait (name, trait_args, trait_bound_regions)
+                            when canonicalize_item_name name =
+                                 "std::ops::FnMut" &&
+                                 trait_args = args &&
+                                 trait_bound_regions = bound_regions ->
+                              [ () ]
+                          | _ -> [])
+                   in
                    (match (bound_regions, args, proj_pred.term) with
                    | ( [ r1; r2 ],
                        [ `Type (`Param f);
                          `Type
                            (`Tuple
-                             [ `Ref (arg_r1, false, `Param t1);
-                               `Ref (arg_r2, false, `Param t2) ]) ],
+                             [ `Ref (arg_r1, false, t1);
+                               `Ref (arg_r2, false, t2) ]) ],
                        Ty rhs )
                      when r1 <> r2 && r1 = arg_r1 && r2 = arg_r2 &&
-                          t1 = t2 && decode_ty rhs = `Bool &&
+                          callback_referent t1 <> None &&
+                          callback_referent t1 = callback_referent t2 &&
+                          decode_ty rhs = `Bool &&
                           canonicalize_item_name
                             proj_pred.projection_term.def_id
                           = "std::ops::FnOnce::Output" &&
-                          List.exists
-                            (function
-                              | `Trait (name, trait_args) ->
-                                  canonicalize_item_name name = "std::ops::FnMut" &&
-                                  trait_args = args
-                              | _ -> false)
-                            clauses ->
+                          matching_fnmut_bounds = [ () ] ->
+                       let referent = Option.get (callback_referent t1) in
+                       let referent_name = match referent with
+                         | HrtbParam name -> name
+                         | HrtbU64 -> "u64"
+                       in
                        Printf.eprintf
                          "MERGE_HRTB_BOUND function=%s F=%s T=%s regions=%s,%s output=bool\n%!"
-                         name f t1 r1 r2;
-                       [ (f, t1) ]
+                         name f referent_name r1 r2;
+                       [ (f, referent) ]
                    | _ -> [])
                | _ -> [])
         in
@@ -6414,9 +6764,151 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                       translate_basic_block ret_place_id bblock_cpn)
                     bblocks_cpn
             in
+            let bblocks =
+              match State.first_callback, !State.first_callback_call_loc,
+                    !State.first_callback_normal_target with
+              | None, None, None -> bblocks
+              | Some plan, Some call_loc, Some normal_target
+                when !State.first_callback_used ->
+                  let source_pos l = fst (Ast.lexed_loc l) in
+                  let calls = List.sort
+                    (fun (a, _) (b, _) -> compare (source_pos a) (source_pos b))
+                    !State.first_fnmut_calls in
+                  let prefix =
+                    name = "insert_tail_first_callback_prefix" ||
+                    String.ends_with
+                      ~suffix:"::insert_tail_first_callback_prefix" name in
+                  let calls_ok =
+                    match calls, prefix with
+                    | [(first, `Continue)], true -> first = call_loc
+                    | [(first, `Continue); (late, `Cleanup)], false ->
+                        first = call_loc && source_pos first < source_pos late &&
+                        (let ((first_file, _, _), _) = Ast.lexed_loc first in
+                         let ((late_file, _, _), _) = Ast.lexed_loc late in
+                         first_file = late_file)
+                    | _ -> false in
+                  if not calls_ok then
+                    Ast.static_error call_loc
+                      "First callback recovery requires first Continue and the exact prefix or late Cleanup shape"
+                      None;
+                  if prefix && List.exists (fun block ->
+                       BasicBlockRd.is_cleanup_get block ||
+                       (match TerminatorKindRd.get
+                         (TerminatorRd.kind_get (BasicBlockRd.terminator_get block)) with
+                       | TerminatorKindRd.Drop _ -> true
+                       | TerminatorKindRd.Call data ->
+                           (match UnwindActionRd.get
+                             (FnCallDataRd.unwind_action_get data) with
+                            | UnwindActionRd.Cleanup _ -> true
+                            | _ -> false)
+                       | _ -> false)) bblocks_cpn then
+                    Ast.static_error call_loc
+                      "First callback prefix contains a Drop or Cleanup edge"
+                      None;
+                  let matching_call = List.filter (fun (bb : Mir.basic_block) ->
+                    match bb.terminator with
+                    | Mir.GotoTerminator (at, target) ->
+                        at = call_loc && target = normal_target
+                    | _ -> false) bblocks in
+                  let call_bb = match matching_call with
+                    | [bb] -> bb
+                    | _ -> Ast.static_error call_loc
+                        "First callback normal successor is not unique" None in
+                  let original_predecessors = List.filter
+                    (fun (bb : Mir.basic_block) ->
+                      List.mem normal_target bb.successors) bblocks in
+                  if List.map (fun (bb : Mir.basic_block) -> bb.id)
+                       original_predecessors <> [call_bb.id] then
+                    Ast.static_error call_loc
+                      "First callback normal successor has another predecessor"
+                      None;
+                  let scope_end_id = "#merge_first_callback_scope_end" in
+                  let normal_recover_id = "#merge_first_callback_normal_recover" in
+                  if List.exists (fun (bb : Mir.basic_block) ->
+                       bb.id = scope_end_id || bb.id = normal_recover_id) bblocks ||
+                     not (List.exists (fun (bb : Mir.basic_block) ->
+                       bb.id = normal_target) bblocks) then
+                    Ast.static_error call_loc
+                      "First callback local continuation collides with the MIR CFG"
+                      None;
+                  let reset_bb (bb : Mir.basic_block) =
+                    {bb with external_predecessor_count = 0;
+                             internal_predecessor_count = 0;
+                             walk_state = Mir.NotSeen; is_block_head = false;
+                             parent = None; children = []} in
+                  let call_bb' =
+                    {call_bb with
+                      terminator = Mir.GotoTerminator (call_loc, scope_end_id);
+                      successors = [scope_end_id]} in
+                  let scope_end_bb = reset_bb
+                    {call_bb with id = scope_end_id; statements = [];
+                      terminator_stmts =
+                        [Ast.ExprStmt (Ast.CallExpr
+                          (plan.first_scope_end_loc, "#ghost_decl_block_end",
+                           [], [], [], Ast.Static))];
+                      terminator = Mir.GotoTerminator
+                        (plan.first_scope_end_loc, normal_recover_id);
+                      successors = [normal_recover_id]} in
+                  let normal_recover_bb = reset_bb
+                    {call_bb with id = normal_recover_id;
+                      statements = [fresh_first_callback_stmt plan.first_recover_stmt];
+                      terminator_stmts = [];
+                      terminator = Mir.GotoTerminator
+                        (plan.first_scope_end_loc, normal_target);
+                      successors = [normal_target]} in
+                  List.map (fun (bb : Mir.basic_block) ->
+                    if bb.id = call_bb.id then call_bb' else bb) bblocks @
+                  [scope_end_bb; normal_recover_bb]
+              | _ -> Ast.static_error fn_sig_loc
+                  "First callback recovery markers did not match a call" None
+            in
             let toplevel_blocks = find_blocks bblocks in
             let vf_bblocks =
               translate_basic_blocks_to_stmts toplevel_blocks []
+            in
+            let vf_bblocks =
+              match State.first_callback, !State.first_callback_call_loc,
+                    !State.first_callback_normal_target with
+              | None, None, None -> vf_bblocks
+              | Some plan, Some call_loc, Some normal_target ->
+                  let matches_scope = function
+                    | Ast.BlockStmt (_,
+                        [Ast.TypeWithTypeidDecl (_, name, _) as _decl],
+                        Ast.ExprStmt (Ast.CallExpr
+                          (_, "#strict_lft_binding_scope", [Ast.IdentTypeExpr (_, None, lft)],
+                           [], [], Ast.Static)) :: _, _, _)
+                      when name = plan.first_lft && lft = plan.first_lft -> true
+                    | _ -> false in
+                  let found = ref 0 in
+                  let panic_continuation =
+                    [Ast.Assert (call_loc, Ast.False call_loc);
+                     Ast.LabelStmt (call_loc, State.first_callback_unwind_label);
+                     fresh_first_callback_stmt plan.first_recover_stmt;
+                     Ast.ReturnStmt (call_loc, Some (Ast.CallExpr
+                       (call_loc, "unwinding", [], [], [], Ast.Static)))] in
+                  let rec splice_stmt stmt = match stmt with
+                    | Ast.BlockStmt (at, decls, stmts, close, addresses) ->
+                        Ast.BlockStmt
+                          (at, decls, splice_stmts stmts, close, addresses)
+                    | stmt -> stmt
+                  and splice_stmts stmts =
+                    List.concat_map (fun stmt ->
+                      if matches_scope stmt then (
+                        incr found;
+                        [stmt] @ panic_continuation)
+                      else [splice_stmt stmt]) stmts in
+                  let result = splice_stmts vf_bblocks in
+                  if !found <> 1 then
+                    Ast.static_error call_loc
+                      "First callback local unwind continuation has no unique strict scope"
+                      None;
+                  Printf.eprintf
+                    "MERGE_FIRST_CALLBACK_LOCAL_CONTINUE function=%s call=%s target=%s lifetime=%s\n%!"
+                    name (Ast.string_of_loc call_loc) normal_target
+                    plan.first_lft;
+                  result
+              | _ -> Ast.static_error fn_sig_loc
+                  "First callback recovery markers did not match a call" None
             in
             (* This deliberately invalid generated call is a separately
                profiled control. Select its local and receiver from the MIR
@@ -7829,7 +8321,13 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
               in
               impl_clauses
               |> List.iter @@ fun impl_clause ->
-                 if not (List.mem impl_clause clauses) then
+                 let same_adt_constraint candidate =
+                   match impl_clause, candidate with
+                   | `Trait (name1, args1, _), `Trait (name2, args2, _) ->
+                       name1 = name2 && args1 = args2
+                   | _ -> impl_clause = candidate
+                 in
+                 if not (List.exists same_adt_constraint clauses) then
                    let string_of_clauses clauses =
                      String.concat ", " (List.map string_of_clause clauses)
                    in
@@ -7852,7 +8350,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
               in
               impl_clauses
               |> Util.flatmap (function
-                   | `Trait (trait_name', `Type (`Param x) :: _) ->
+                   | `Trait (trait_name', `Type (`Param x) :: _, _) ->
                        [
                          ( List.assoc x impl_type_param_map,
                            canonicalize_item_name trait_name' );
