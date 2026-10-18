@@ -5684,24 +5684,29 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
             | Ast.CallExpr (_, found, [], [], found_args, Ast.Static) ->
                 found = name && args found_args
             | _ -> false in
-          let drop xs = expr_call "drop"
-            (function [Ast.LitPat n; Ast.LitPat e] ->
-              one n && xs e | _ -> false) in
           let take xs = expr_call "take"
             (function [Ast.LitPat n; Ast.LitPat e] ->
               one n && xs e | _ -> false) in
-          let first_rest = drop (var "xs") in
-          let sift_seq = take first_rest in
-          let tail_seq = drop first_rest in
-          let head seq = expr_call "head"
-            (function [Ast.LitPat e] -> seq e | _ -> false) in
+          let singleton name = expr_call "cons"
+            (function [Ast.LitPat value; Ast.LitPat rest] ->
+              var name value && var "nil" rest | _ -> false) in
+          let sift_seq = singleton "current_sift" in
+          let tail_seq = singleton "current_tail" in
+          let current_rest = expr_call "append"
+            (function [Ast.LitPat left; Ast.LitPat right] ->
+              sift_seq left && tail_seq right | _ -> false) in
+          let bind_current ptr name = function
+            | Ast.Assert (_, Ast.PointsTo
+                (_, Ast.Deref (_, Ast.Var (_, pointer)), Ast.RegularPointsTo,
+                 Ast.VarPat (_, found))) -> pointer = ptr && found = name
+            | _ -> false in
           let own_pred = function
             | Ast.CallExpr (_, "own", [tp], [], [t], Ast.Static) ->
                 u64 tp && pvar "t" t
             | _ -> false in
-          let close_own seq = function
+          let close_own name = function
             | Ast.Close (_, None, "own", [tp], [t], [Ast.LitPat e], None) ->
-                u64 tp && pvar "t" t && head seq e
+                u64 tp && pvar "t" t && var name e
             | _ -> false in
           let close_foreach seq = function
             | Ast.Close (_, None, "foreach", [], [],
@@ -5718,20 +5723,22 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
             | _ -> false in
           let array_join ptr = call "array_join" only_u64
             (function [Ast.LitPat p] -> ptr p | _ -> false) in
-          let foreach_join seq = call "foreach_join" no_targs
-            (function [Ast.LitPat elems; Ast.LitPat own; Ast.LitPat n] ->
-              seq elems && own_pred own && one n | _ -> false) in
+          let foreach_append left right = call "foreach_append" no_targs
+            (function [Ast.LitPat xs; Ast.LitPat ys] ->
+              left xs && right ys | _ -> false) in
           let recover_shape = function
-            | [a; b; c; d; e; f; g; h; i; j; k; l; m; n; o; p] ->
+            | [a; b; c; d; e; f; g; h; i; j; k; l; m; n; o; p; q; r] ->
                 token_assert "1" a && end_lifetime b &&
                 borrow_end "tail" c && open_full "tail" d &&
-                borrow_end "sift" e && open_full "sift" f &&
-                close_own sift_seq g && close_own tail_seq h &&
-                close_foreach sift_seq i && close_foreach tail_seq j &&
-                close_array "sift" sift_seq k &&
-                close_array "tail" tail_seq l &&
-                array_join begin_plus_one m && array_join (var "begin") n &&
-                foreach_join first_rest o && foreach_join (var "xs") p
+                bind_current "tail" "current_tail" e &&
+                borrow_end "sift" f && open_full "sift" g &&
+                bind_current "sift" "current_sift" h &&
+                close_own "current_sift" i && close_own "current_tail" j &&
+                close_foreach sift_seq k && close_foreach tail_seq l &&
+                close_array "sift" sift_seq m && close_array "tail" tail_seq n &&
+                array_join begin_plus_one o && array_join (var "begin") p &&
+                foreach_append sift_seq tail_seq q &&
+                foreach_append (take (var "xs")) current_rest r
             | _ -> false in
           if not (close_shape close_commands && recover_shape recover_commands) then
             Ast.static_error cut_l
