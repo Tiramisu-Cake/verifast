@@ -1992,7 +1992,8 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
       let first_callback_used = ref false
       let first_callback_call_loc = ref None
       let first_callback_normal_target = ref None
-      let first_fnmut_calls = ref []
+      let first_fnmut_calls :
+          (Ast.loc * [ `Continue | `Cleanup | `Other ]) list ref = ref []
       let first_callback_unwind_label = "#merge_first_callback_unwind"
       let callback_used = ref false
       let callback_call_loc = ref None
