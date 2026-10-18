@@ -6018,7 +6018,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
            source_pos l < source_pos cut_l && source_pos cut_l < source_pos closeBraceLoc)
            strict_lft_scope_ends with
          | Some (cut_l, _) when List.mem_assoc cut_l first_strict_scope_ends ->
-             [Ast.NoopStmt closeBraceLoc]
+             [Ast.NoopStmt cut_l; Ast.NoopStmt closeBraceLoc]
          | Some (cut_l, _) -> [end_stmt cut_l; Ast.NoopStmt closeBraceLoc]
          | None -> [end_stmt closeBraceLoc]
     in
