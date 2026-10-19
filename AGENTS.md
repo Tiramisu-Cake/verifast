@@ -16,8 +16,10 @@ proof-blockers или проектирование нового lowering/model �
 
 ## Первые чтения и границы
 
-1. Прочитать текущее поручение, этот файл, [WORKFLOW](docs/challenge8/WORKFLOW.md)
-   и [STATUS](docs/challenge8/STATUS.md). Чтение инструкций **не разрешает новую
+1. Прочитать [текущее поручение и отчёт](docs/challenge8/CURRENT-TASK.md), этот файл,
+   [WORKFLOW](docs/challenge8/WORKFLOW.md) и [STATUS](docs/challenge8/STATUS.md).
+   Конкретное актуальное поручение задаёт разрешённые Git/fork действия и имеет
+   приоритет над историческим ожиданием approval в STATUS. Чтение инструкций **не разрешает новую
    фазу** разработки, review, вычислений или публикации.
 2. Проверить каталог, Git status, ветку, HEAD, remotes и незавершённую передачу.
    Сохранить изменения пользователя; не делать reset/force-push, не менять
