@@ -1554,7 +1554,7 @@ module VerifyExpr(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
         List.iter (fun p -> pat_expr_mark_addr_taken p locals) pats;
         (match eopt with None -> () | Some(e) -> expr_mark_addr_taken e locals); 
         cont locals
-    | MergeFractionsStmt(_, a) -> ass_mark_addr_taken a locals;
+    | MergeFractionsStmt(_, a) -> ass_mark_addr_taken a locals; cont locals
     | CreateHandleStmt(_, _, _, _, e) -> expr_mark_addr_taken e locals; cont locals
     | DisposeBoxStmt(_, _, pats, clauses) -> 
         List.iter (fun p -> pat_expr_mark_addr_taken p locals) pats;
