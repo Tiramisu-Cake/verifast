@@ -1,8 +1,16 @@
+> **Роли SmallSort:** Select/Merge разрабатывают патчи; VeriFast maintainer принимает готовые опубликованные патчи для review/регрессий/интеграции/upstream-пакета. Новый proof-blocker/model design ему автоматически не передаётся. [Границы роли](/root/verify-rust-std-evidence-brief/research/challenge-8/VERIFAST-ROLE.md).
+
+> **Evidence v0.11 — приоритет:** [краткий guide](/root/SMALLSORT-BRIEF-AGENT-GUIDE-RU.md). Brief → catalogue → refresh/info → locate/fragment → нужные страницы по next_offset/next_value_start. Пожизненной16-квоты и прежних лексических WITHHELD больше нет; соседний контекст/argv/environment читаются как данные. Не выгружать автоматически всё. Proof scope, T0, окна/бюджеты и coordinator сохраняются.
+
+> **Процесс итераций, 2026-10-19:** [ранние checks → целевой proof → полная матрица](/root/verify-rust-std-evidence-brief/research/challenge-8/ITERATION-PROCESS.md). Service error-path tests обязательны для затронутого runner; использовать существующий Cloud preflight. Принять на безопасной границе без изменения активных inputs/T0. Измерять закрытые proof obligations отдельно от setup-работы.
+
 # Challenge 8: сопровождение VeriFast
 
-Обязательная точка входа для роли `verifast`. Здесь сопровождаются изменения
-VeriFast, общие specs и воспроизводимые поставки инструмента для двух
-proof-направлений Challenge 8: select/sort4 и merge/guard/Drop/insertion/fallback.
+Обязательная точка входа для роли `verifast`: приёмка готовых опубликованных
+инструментальных патчей других proof-агентов — review, регрессии, интеграция,
+совместимость и подготовка upstream-пакетов. Самостоятельное исследование новых
+proof-blockers или проектирование нового lowering/model не поручается этой роли
+автоматически; расширение роли требует отдельного поручения владельца.
 Основные агенты продолжают свои экспериментальные доказательства и патчи;
 они не обязаны передавать всю разработку или ждать нашего review.
 
