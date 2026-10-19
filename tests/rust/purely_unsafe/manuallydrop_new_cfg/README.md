@@ -20,6 +20,9 @@ dead-code check. The suite uses mysh's existing exact-output assertion to requir
 the expected dead-code diagnostics and exit status 1. An unrelated early error
 cannot satisfy this control. The expected diagnostic is whole-function dead code,
 not a failed precondition assertion.
+The capture runs through `sh dead_code_pre.sh`: native Windows mysh starts
+commands through `cmd.exe`, so the POSIX exit-status capture must live in an
+explicit shell script. The exact expected diagnostics and `EXIT:1` stay the same.
 No fixture disables unwind, resource, or dead-code checking.
 
 From this directory after building VeriFast:

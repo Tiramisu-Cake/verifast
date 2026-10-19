@@ -38,7 +38,7 @@ cd purely_unsafe
     verifast shared_cleanup.rs
     verifast -allow_should_fail false_normal_post.rs
     verifast -allow_should_fail shared_false_unwind.rs
-    [ "$(verifast dead_code_pre.rs 2>&1; case_exit=$?; echo EXIT:$case_exit)" = $'(type)\ndead_code_pre.rs(1,1-7,2): dead code\ndead_code_pre.rs(6,13-43): dead code\ndead_code_pre.rs(6,41-42): dead code\ndead_code_pre.rs(7,2): dead code\nEXIT:1' ]
+    [ "$(sh dead_code_pre.sh)" = $'(type)\ndead_code_pre.rs(1,1-7,2): dead code\ndead_code_pre.rs(6,13-43): dead code\ndead_code_pre.rs(6,41-42): dead code\ndead_code_pre.rs(7,2): dead code\nEXIT:1' ]
   cd ..
   verifast enum_discr.rs
   verifast -ignore_unwind_paths leftpad.rs
