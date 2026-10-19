@@ -50,6 +50,11 @@ Tiramisu-Cake/verifast; стандартный CI форка разрешён в
 Select/Merge остаются в своих Cloud lanes. На VPS тяжёлые build dependencies,
 компиляция/proof execution запрещены. Actions evidence — компактные run/job/check
 summaries, без full-log скачивания; smallsort-brief относится к GCP Builds.
+Если актуальное поручение явно разрешает узкий administrative Actions audit,
+выполни описанную там адресную диагностику с ограниченным выводом; изолированная
+обработка выбранного job на hosted runner не разрешает скачивать полный лог на
+VPS или читать другие raw evidence. Внутри поручения сам выбирай подзадачи и
+продолжай после исправлений без повторного согласования каждого blocker/SHA.
 Для каждой новой GCP-сессии owner `verifast` нужны отдельные разрешённые фаза, бюджет, ledger и
 подключение к существующему coordinator: максимум три queued/running/unresolved
 Build суммарно и один на owner/ledger. Исторические бюджеты не наследуются.

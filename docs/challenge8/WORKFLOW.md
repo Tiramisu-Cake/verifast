@@ -166,6 +166,14 @@ upstream-пакета добиваться green применимых fork CI jo
 GCP budget/ledger и Actions runs/durations учитывать отдельно. Читать компактные
 run/job/step/check summaries/annotations; Actions run ID не является GCP Build UUID,
 full-log архивы не скачивать. Scope/timebox Actions задаёт текущее поручение.
+При явно разрешённом в [текущем задании](CURRENT-TASK.md) узком administrative
+Actions audit допустим bounded fragment или одноразовая изолированная обработка
+точно выбранного failed job на hosted runner с компактным выводом. Это не
+разрешение читать/скачивать полный лог на VPS, весь run archive, чужие jobs или
+raw GCP evidence. Соблюдать scope/bounds/provenance поручения; новый постоянный
+collector/service не создавать. Подзадачи, необходимые исправления и CI-итерации
+внутри готового патча выбираются агентом самостоятельно, без согласования каждого
+нового blocker/profile SHA; конечные гарантии и роль maintainer сохраняются.
 
 Стабильный owner — `verifast`. Перед новой GCP-фазой и первым Cloud Build нужны отдельное
 разрешение на фазу, её собственный бюджет и ledger, проверенная lane и подключение
