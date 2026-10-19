@@ -1,0 +1,24 @@
+{
+  "base": "0a83dba42db7ce0b445034ece5298afe980e57dc",
+  "head": "ac6a63d5cad3a028e5d6f7ee4439169ba443468b",
+  "tree": "9f3ffe26fc1439460afb1d2bbcb26f283f46276e",
+  "repository": "Tiramisu-Cake/verifast",
+  "branch": "fix/manuallydrop-new-cfg-windows-20261020",
+  "ci_run_id": 39339228464,
+  "ci_attempt": 1,
+  "ci_conclusion": "success",
+  "PR_body_sha256": "f16f05bc8802c9e97aa9f01b77b3a807e897a5488f6a557ed3e6a6ce3aff427f",
+  "PR_title_sha256": "dfa9b93e9368fdb751625483adfe217c476152f0fcd53694c3e42807f1c21b1c",
+  "full_diff_sha256": "38f75b7ec8919041cc0c7e35eda117bfc023d00fe955f71462703c81754f80af",
+  "source_attribution": "ORIGINAL-ATTRIBUTION.json (unchanged historical attribution)",
+  "review": "independent incremental Luna HIGH APPROVE; fresh user head/title/body approval pending",
+  "files": {
+    "CHECKS.md": "eb4b88f6c1f6b625f388b5eb88bf822f4be3360dddd64de6213637a0c5c65763",
+    "ORIGINAL-ATTRIBUTION.json": "55ffedd594a0e3fd84c3c213c7b03b64d20601b26b60dd9f79a9fce7e92c1686",
+    "PR-BODY.md": "f16f05bc8802c9e97aa9f01b77b3a807e897a5488f6a557ed3e6a6ce3aff427f",
+    "PR-DRAFT.md": "b4a1101f089c5ba551f5881d4b17171d2656cab63e10b726ba5a0423569f0f62",
+    "PR-TITLE.txt": "dfa9b93e9368fdb751625483adfe217c476152f0fcd53694c3e42807f1c21b1c",
+    "REVIEW.md": "d44bd56619c9ea5d26ceec2a4df1156907e74efdd767d066505d2908ee3e2afe",
+    "pr.diff": "38f75b7ec8919041cc0c7e35eda117bfc023d00fe955f71462703c81754f80af"
+  }
+}

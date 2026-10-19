@@ -1,0 +1,69 @@
+{
+  "entrypoint_review": "five-line sh capture only; isolated fake verifast in sole PATH; no actual compiler/verifier invoked",
+  "syntax": "sh -n PASS",
+  "original_expected_output_unchanged": true,
+  "translator_fixtures_workflow_unchanged": true,
+  "cases": [
+    {
+      "case": "exact_exit1",
+      "expected_accepted": true,
+      "accepted": true,
+      "result": "PASS"
+    },
+    {
+      "case": "exact_stderr_exit1",
+      "expected_accepted": true,
+      "accepted": true,
+      "result": "PASS"
+    },
+    {
+      "case": "exact_exit0",
+      "expected_accepted": false,
+      "accepted": false,
+      "result": "PASS"
+    },
+    {
+      "case": "exact_exit2",
+      "expected_accepted": false,
+      "accepted": false,
+      "result": "PASS"
+    },
+    {
+      "case": "exact_exit127",
+      "expected_accepted": false,
+      "accepted": false,
+      "result": "PASS"
+    },
+    {
+      "case": "missing_diagnostic",
+      "expected_accepted": false,
+      "accepted": false,
+      "result": "PASS"
+    },
+    {
+      "case": "extra_diagnostic",
+      "expected_accepted": false,
+      "accepted": false,
+      "result": "PASS"
+    },
+    {
+      "case": "wrong_location",
+      "expected_accepted": false,
+      "accepted": false,
+      "result": "PASS"
+    },
+    {
+      "case": "unrelated_frontend_error",
+      "expected_accepted": false,
+      "accepted": false,
+      "result": "PASS"
+    },
+    {
+      "case": "missing_tool_output",
+      "expected_accepted": false,
+      "accepted": false,
+      "result": "PASS"
+    }
+  ],
+  "actual_verification_local": "NOT_RUN"
+}

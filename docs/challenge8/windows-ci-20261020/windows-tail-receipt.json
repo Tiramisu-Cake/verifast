@@ -1,0 +1,20 @@
+{
+  "run": 39335742193,
+  "job": 118344682458,
+  "head": "bf63b7dff2e053eea8541996d856fac4be11f6f1",
+  "attempt": 1,
+  "source": "GitHub job logs API redirect, URL not recorded",
+  "request_byte_range": [
+    365256,
+    377255
+  ],
+  "http_status": 206,
+  "content_range": "bytes 365256-377255/377256",
+  "body_bytes": 12000,
+  "selector": "last20 lines of bounded tail fragment",
+  "coverage": "12k tail only; not an exhaustive first-error search",
+  "excerpt_sha256": "1942d129256cbd8a44c32fe9f2337b2291b869e637773f5ecfcd47cb1b924cbe",
+  "bounds_error_redaction_synthetic_tests": "PASS",
+  "cleanup_excerpt_retained": false,
+  "reason": "irrelevant checkout cleanup excerpt discarded; substantive selected excerpt stored separately"
+}

@@ -1,0 +1,41 @@
+{
+  "task": "verifast-windows-ci-ready-patch-2026-10-20-r2",
+  "T0_utc": "2026-10-19T22:56:23Z",
+  "main_cutoff_utc": "2026-10-20T00:56:23Z",
+  "absolute_cutoff_utc": "2026-10-20T01:26:23Z",
+  "checkpoint_utc": "2026-10-19 23:19:13 UTC",
+  "GCP_builds": 0,
+  "GCP_charge_seconds": 0,
+  "new_Actions_runs": [
+    {
+      "run_id": 39339228464,
+      "head": "ac6a63d5cad3a028e5d6f7ee4439169ba443468b",
+      "attempt": 1,
+      "purpose": "complete existing matrix after minimal Windows registration repair",
+      "conclusion": "success",
+      "run_duration_ms": 684000,
+      "applicable_job_intervals_sum_s": 2048
+    }
+  ],
+  "reruns": 0,
+  "diagnostic_helper_runs": 0,
+  "cancelled": 0,
+  "own_active_or_pending": 0,
+  "historical_diagnostic_input": {
+    "run_id": 39335742193,
+    "job_id": 118344682458,
+    "attempt": 1,
+    "new_submission": false,
+    "bounded_GET_responses": 2,
+    "body_bytes_each": 12000,
+    "unique_source_byte_range": [
+      365256,
+      377255
+    ],
+    "total_raw_job_bytes_from_HEAD_only": 377256,
+    "full_log_retrieved": false
+  },
+  "local_compile_proof": "NOT_RUN",
+  "upstream_publication": false,
+  "remaining_task": "fresh user review/approval of exact head/title/body before upstream PR"
+}

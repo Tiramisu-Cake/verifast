@@ -1,0 +1,10 @@
+{
+  "base": "0a83dba42db7ce0b445034ece5298afe980e57dc",
+  "head": "ac6a63d5cad3a028e5d6f7ee4439169ba443468b",
+  "tree": "9f3ffe26fc1439460afb1d2bbcb26f283f46276e",
+  "pr_diff_sha256": "38f75b7ec8919041cc0c7e35eda117bfc023d00fe955f71462703c81754f80af",
+  "patch_check": "PASS; applies in temporary Git index seeded with exact base; result tree equals final head; actual worktree/index untouched",
+  "technical_worktree_clean": true,
+  "original_bf63_ref_unchanged": true,
+  "local_build_proof": "NOT_RUN"
+}

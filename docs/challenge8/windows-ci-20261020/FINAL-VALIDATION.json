@@ -1,0 +1,14 @@
+{
+  "package_file_hashes": "PASS",
+  "draft_body_exact_bytes": "PASS",
+  "old_approval_and_attribution_unchanged": "PASS",
+  "local_links_checked": 55,
+  "JSON_parsing": "PASS",
+  "authorized_excerpt_bytes": 1586,
+  "authorized_excerpt_lines": 17,
+  "excerpt_hash": "PASS",
+  "candidate_head_tree_and_clean_status": "PASS",
+  "patch_application_tree_check": "PACKAGE-VALIDATION.json",
+  "whitespace_check": "all staged docs except byte-preserving pr.diff artifact; patch content independently applies exactly to base tree",
+  "local_compiler_proof": "NOT_RUN"
+}

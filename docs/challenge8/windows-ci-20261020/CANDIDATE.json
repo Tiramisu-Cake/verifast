@@ -1,0 +1,24 @@
+{
+  "base": "0a83dba42db7ce0b445034ece5298afe980e57dc",
+  "old_head": "bf63b7dff2e053eea8541996d856fac4be11f6f1",
+  "head": "ac6a63d5cad3a028e5d6f7ee4439169ba443468b",
+  "tree": "9f3ffe26fc1439460afb1d2bbcb26f283f46276e",
+  "branch": "fix/manuallydrop-new-cfg-windows-20261020",
+  "head_repository": "Tiramisu-Cake/verifast",
+  "review": "INDEPENDENT-REVIEW.md; approved three blobs before commit",
+  "commits": [
+    "9959fe7a20a7aa2214a72b50bcc8e1b452b1ccf4 Rust: align ManuallyDrop::new successors with its identity CFG",
+    "bf63b7dff2e053eea8541996d856fac4be11f6f1 Rust: register ManuallyDrop identity and unwind regressions",
+    "ac6a63d5cad3a028e5d6f7ee4439169ba443468b Rust: make ManuallyDrop dead-code regression portable to Windows"
+  ],
+  "remote_git_sha_verified": "ac6a63d5cad3a028e5d6f7ee4439169ba443468b",
+  "remote_api_sha_verified": "ac6a63d5cad3a028e5d6f7ee4439169ba443468b",
+  "workflow_blob_unchanged": "7554f15b073873fcbf154e7ea88a8cc4c42cd609",
+  "run_id": 39339228464,
+  "event": "push",
+  "attempt": 1,
+  "run_started_at": "2026-10-19T23:04:20Z",
+  "status": "CI SUCCESS:6 applicable PASS;6 release/upload skipped",
+  "run_completed_at": "2026-10-19T23:15:44Z",
+  "run_duration_ms": 684000
+}

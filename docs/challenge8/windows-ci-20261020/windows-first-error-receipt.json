@@ -1,0 +1,25 @@
+{
+  "repository": "Tiramisu-Cake/verifast",
+  "run": 39335742193,
+  "job": 118344682458,
+  "attempt": 1,
+  "head": "bf63b7dff2e053eea8541996d856fac4be11f6f1",
+  "workflow_blob": "7554f15b073873fcbf154e7ea88a8cc4c42cd609",
+  "step": 4,
+  "source_byte_range": [
+    365256,
+    377255
+  ],
+  "source_total_bytes": 377256,
+  "http_status": 206,
+  "body_bytes_received_per_request": 12000,
+  "selected_fragment_lines_1_based": [
+    41,
+    57
+  ],
+  "excerpt_sha256": "aa0d0e30e9c5de3567314942907148ffe51fe123922658bbed9cb94ac80c37e0",
+  "coverage": "tail fragment only; identifies failed assertion and its reported actual output, not all earlier expected-negative output",
+  "full_log_downloaded": false,
+  "hosted_helper_needed": false,
+  "normalization": "credential/query redaction and trailing-whitespace trim only"
+}

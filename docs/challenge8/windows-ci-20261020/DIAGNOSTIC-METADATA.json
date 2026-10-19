@@ -1,0 +1,19 @@
+{
+  "T0_utc": "2026-10-19T22:56:23Z",
+  "main_cutoff_utc": "2026-10-20T00:56:23Z",
+  "absolute_cutoff_utc": "2026-10-20T01:26:23Z",
+  "repository": "Tiramisu-Cake/verifast",
+  "run_id": 39335742193,
+  "job_id": 118344682458,
+  "attempt": 1,
+  "head": "bf63b7dff2e053eea8541996d856fac4be11f6f1",
+  "workflow_blob": "7554f15b073873fcbf154e7ea88a8cc4c42cd609",
+  "log_redirect_status": 302,
+  "HEAD_headers": {
+    "Content-Type": "text/plain",
+    "Content-Length": "377256",
+    "Accept-Ranges": "bytes"
+  },
+  "body_bytes_read": 0,
+  "phase": "initial HEAD-only metadata probe, before bounded GETs recorded separately"
+}

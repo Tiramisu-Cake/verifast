@@ -1,3 +1,31 @@
+# Current handoff — READY_FOR_USER_REVIEW — Windows CI green
+
+Current owner verifast; sole active maintainer submission variant:
+`/root/verifast-mdnew-final`, branch `fix/manuallydrop-new-cfg-windows-20261020`.
+Head `ac6a63d5cad3a028e5d6f7ee4439169ba443468b`, unchanged base
+`0a83dba42db7ce0b445034ece5298afe980e57dc`, new tree
+`9f3ffe26fc1439460afb1d2bbcb26f283f46276e`; fork Git/API SHA verified.
+Original bf63 refs are retained historical sources, not the active repair variant.
+
+Original Windows job118344682458/run39335742193 failed only the added exact-output
+registration: all four intended diagnostics appeared, but POSIX status marker was
+absent under native mysh/cmd.exe. [Addressed audit and rationale](../windows-ci-20261020/DIAGNOSIS.md).
+The incremental helper/registration/README diff keeps exact output and exit1,
+translator/five Rust fixtures/workflow unchanged. [Independent Luna HIGH review](../windows-ci-20261020/INDEPENDENT-REVIEW.md)
+APPROVE;10 synthetic controls PASS. [Fresh full CI39339228464](https://github.com/Tiramisu-Cake/verifast/actions/runs/39339228464)/attempt1
+SUCCESS: all6 applicable jobs PASS,6 guarded release/upload jobs skipped, wall684s
+and sum job intervals2048s, no reruns. [Checks](../reviews/manuallydrop-new-windows-20261020/CHECKS.md).
+[Fresh package](../reviews/manuallydrop-new-windows-20261020/REVIEW.md) is a new
+version ready for new exact-head/title/body review; body SHA256
+`f16f05bc8802c9e97aa9f01b77b3a807e897a5488f6a557ed3e6a6ce3aff427f`; previous approved snapshot/body
+c1b21d03 remains unchanged and does not approve this new head. No upstream PR or
+consumer pin acceptance. GCP0; no local compiler/proof execution.
+
+## Historical handoffs
+
+The following dated checkpoints retain their original scope, receipts and old
+local-only/no-fork/publication-wait wording. Current task/STATUS above govern.
+
 # Current handoff — READY_FOR_USER_APPROVAL
 
 User reports independent code/archive review complete without blocking findings.

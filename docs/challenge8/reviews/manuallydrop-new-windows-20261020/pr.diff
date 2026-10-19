@@ -1,0 +1,243 @@
+diff --git a/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml b/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
+index 4e237a61..03e7e407 100644
+--- a/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
++++ b/src/rust_frontend/vf_mir_translator/vf_mir_translator.ml
+@@ -2322,7 +2322,8 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
+ 
+     let translate_fn_call_rexpr (callee_cpn : OperandRd.t)
+         (args_cpn : OperandRd.t list) (call_loc : Ast.loc) (fn_loc : Ast.loc)
+-        (ghost_generic_arg_list_opt_cpn : OptionRd.t) =
++        (ghost_generic_arg_list_opt_cpn : OptionRd.t)
++        (manuallydrop_new_identity_lowering : bool ref) =
+       let has_closure_substs =
+         match D.decode_operand callee_cpn with
+           Constant {const = Val {ty = {kind = FnDef { id = { name }; substs }}}} ->
+@@ -2593,6 +2594,8 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
+             | "std::mem::ManuallyDrop::<T>::new"
+             | "std::mem::ManuallyDrop::deref"
+             | "std::mem::ManuallyDrop::deref_mut" ->
++                manuallydrop_new_identity_lowering :=
++                  fn_name = "std::mem::ManuallyDrop::<T>::new";
+                 let [ arg_cpn ] = args_cpn in
+                 let [ arg ] = args in
+                 Ok (tmp_rvalue_binders, FnCallResult arg)
+@@ -2683,9 +2686,10 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
+       let ghost_generic_arg_list_opt_cpn =
+         ghost_generic_arg_list_get fn_call_data_cpn
+       in
++      let manuallydrop_new_identity_lowering = ref false in
+       let* fn_call_tmp_rval_ctx, fn_call_rexpr =
+         translate_fn_call_rexpr func_cpn args_cpn loc fn_loc
+-          ghost_generic_arg_list_opt_cpn
++          ghost_generic_arg_list_opt_cpn manuallydrop_new_identity_lowering
+       in
+       let unwind_stmts, unwind_targets =
+         if TranslatorArgs.ignore_unwind_paths then ([], [])
+@@ -2793,7 +2797,13 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
+                        loc,
+                        ref [] );
+                  ]),
+-              targets @ unwind_targets )
++              (match fn_call_rexpr, terminator with
++              | FnCallResult _, Mir.GotoTerminator _
++                when !manuallydrop_new_identity_lowering ->
++                  (* The identity lowering emits only the normal assignment/goto.
++                     Keep successor inventory faithful to that emitted CFG. *)
++                  targets
++              | _ -> targets @ unwind_targets) )
+       in
+       Ok (full_call_stmts, terminator, targets)
+ 
+diff --git a/tests/rust/purely_unsafe/manuallydrop_new_cfg/README.md b/tests/rust/purely_unsafe/manuallydrop_new_cfg/README.md
+new file mode 100644
+index 00000000..06b4feea
+--- /dev/null
++++ b/tests/rust/purely_unsafe/manuallydrop_new_cfg/README.md
+@@ -0,0 +1,46 @@
++# ManuallyDrop::new CFG regression
++
++`forget.rs` exercises generic identity lowering: the constructor moves its
++argument into a ManuallyDrop wrapper, so it emits no unwind edge. A conservative
++MIR cleanup successor must not introduce an orphan AST block.
++
++`shared_cleanup.rs` checks an ordinary call and a caller sharing cleanup between
++ManuallyDrop::new and an ordinary function named `new`. Real unwind paths must
++remain reachable. Its `normal_first_cleanup` function is the positive control
++for the runtime shape in `shared_false_unwind.rs`.
++
++The false-normal and false-unwind postconditions have one expected-error marker
++each and run separately with `-allow_should_fail`. The false-unwind fixture uses
++a normal-first tail expression: symbolic execution visits the common return
++before the expected unwind error ends verification, and the tail call introduces
++no unvisited continuation goto. The unwind contract and real panic path remain.
++
++`dead_code_pre.rs` has a contradictory precondition and must fail the mandatory
++dead-code check. The suite uses mysh's existing exact-output assertion to require
++the expected dead-code diagnostics and exit status 1. An unrelated early error
++cannot satisfy this control. The expected diagnostic is whole-function dead code,
++not a failed precondition assertion.
++The capture runs through `sh dead_code_pre.sh`: native Windows mysh starts
++commands through `cmd.exe`, so the POSIX exit-status capture must live in an
++explicit shell script. The exact expected diagnostics and `EXIT:1` stay the same.
++No fixture disables unwind, resource, or dead-code checking.
++
++From this directory after building VeriFast:
++
++```text
++verifast forget.rs
++verifast shared_cleanup.rs
++verifast -allow_should_fail false_normal_post.rs
++verifast -allow_should_fail shared_false_unwind.rs
++verifast dead_code_pre.rs
++```
++
++The last command is expected to exit 1. Run the registered Rust suite from the repository root:
++
++```sh
++repo=$(pwd)
++(cd tests/rust && PATH="$repo/bin:$PATH" "$repo/bin/mysh" -cpus 1 < testsuite.mysh)
++```
++
++Run the full repository suite with `make -C src test` in a configured build
++environment.
+diff --git a/tests/rust/purely_unsafe/manuallydrop_new_cfg/dead_code_pre.rs b/tests/rust/purely_unsafe/manuallydrop_new_cfg/dead_code_pre.rs
+new file mode 100644
+index 00000000..a54649df
+--- /dev/null
++++ b/tests/rust/purely_unsafe/manuallydrop_new_cfg/dead_code_pre.rs
+@@ -0,0 +1,7 @@
++pub unsafe fn forget_from_dead_precondition<T>(t: T)
++//@ req thread_token(?tid) &*& tid == currentThread &*& false;
++//@ ens thread_token(tid);
++//@ on_unwind_ens false;
++{
++    let _ = std::mem::ManuallyDrop::new(t);
++}
+diff --git a/tests/rust/purely_unsafe/manuallydrop_new_cfg/dead_code_pre.sh b/tests/rust/purely_unsafe/manuallydrop_new_cfg/dead_code_pre.sh
+new file mode 100644
+index 00000000..389d3c96
+--- /dev/null
++++ b/tests/rust/purely_unsafe/manuallydrop_new_cfg/dead_code_pre.sh
+@@ -0,0 +1,5 @@
++#!/bin/sh
++# Native Windows mysh starts commands through cmd.exe; use explicit sh here.
++verifast dead_code_pre.rs 2>&1
++case_exit=$?
++printf 'EXIT:%s\n' "$case_exit"
+diff --git a/tests/rust/purely_unsafe/manuallydrop_new_cfg/false_normal_post.rs b/tests/rust/purely_unsafe/manuallydrop_new_cfg/false_normal_post.rs
+new file mode 100644
+index 00000000..0ede897d
+--- /dev/null
++++ b/tests/rust/purely_unsafe/manuallydrop_new_cfg/false_normal_post.rs
+@@ -0,0 +1,7 @@
++pub unsafe fn forget_false_normal_post<T>(t: T)
++//@ req thread_token(?tid) &*& tid == currentThread;
++//@ ens false; //~should_fail
++//@ on_unwind_ens false;
++{
++    let _ = std::mem::ManuallyDrop::new(t);
++}
+diff --git a/tests/rust/purely_unsafe/manuallydrop_new_cfg/forget.rs b/tests/rust/purely_unsafe/manuallydrop_new_cfg/forget.rs
+new file mode 100644
+index 00000000..0cb379e4
+--- /dev/null
++++ b/tests/rust/purely_unsafe/manuallydrop_new_cfg/forget.rs
+@@ -0,0 +1,7 @@
++pub unsafe fn forget<T>(t: T)
++//@ req thread_token(?tid) &*& tid == currentThread;
++//@ ens thread_token(tid);
++//@ on_unwind_ens false;
++{
++    let _ = std::mem::ManuallyDrop::new(t);
++}
+diff --git a/tests/rust/purely_unsafe/manuallydrop_new_cfg/shared_cleanup.rs b/tests/rust/purely_unsafe/manuallydrop_new_cfg/shared_cleanup.rs
+new file mode 100644
+index 00000000..45c97e15
+--- /dev/null
++++ b/tests/rust/purely_unsafe/manuallydrop_new_cfg/shared_cleanup.rs
+@@ -0,0 +1,39 @@
++pub unsafe fn new(b: bool)
++//@ req thread_token(?tid) &*& tid == currentThread;
++//@ ens thread_token(tid);
++//@ on_unwind_ens thread_token(tid);
++{
++    if b {
++        panic!("ManuallyDrop CFG regression");
++    }
++}
++
++pub unsafe fn ordinary_caller(b: bool)
++//@ req thread_token(?tid) &*& tid == currentThread;
++//@ ens thread_token(tid);
++//@ on_unwind_ens thread_token(tid);
++{
++    new(b);
++}
++
++pub unsafe fn shared_cleanup<T>(t: T, b: bool)
++//@ req thread_token(?tid) &*& tid == currentThread;
++//@ ens thread_token(tid);
++//@ on_unwind_ens thread_token(tid);
++{
++    let _ = std::mem::ManuallyDrop::new(t);
++    new(b);
++}
++
++// Positive control with the same normal-first shape as the false-unwind test.
++pub unsafe fn normal_first_cleanup<T>(t: T, b: bool)
++//@ req thread_token(?tid) &*& tid == currentThread;
++//@ ens thread_token(tid);
++//@ on_unwind_ens thread_token(tid);
++{
++    let _ = std::mem::ManuallyDrop::new(t);
++    if b {
++    } else {
++        new(true)
++    }
++}
+diff --git a/tests/rust/purely_unsafe/manuallydrop_new_cfg/shared_false_unwind.rs b/tests/rust/purely_unsafe/manuallydrop_new_cfg/shared_false_unwind.rs
+new file mode 100644
+index 00000000..221c061f
+--- /dev/null
++++ b/tests/rust/purely_unsafe/manuallydrop_new_cfg/shared_false_unwind.rs
+@@ -0,0 +1,22 @@
++pub unsafe fn new(b: bool)
++//@ req thread_token(?tid) &*& tid == currentThread;
++//@ ens thread_token(tid);
++//@ on_unwind_ens thread_token(tid);
++{
++    if b {
++        panic!("ManuallyDrop CFG regression");
++    }
++}
++
++pub unsafe fn shared_cleanup_false_unwind_post<T>(t: T, b: bool)
++//@ req thread_token(?tid) &*& tid == currentThread;
++//@ ens thread_token(tid);
++//@ on_unwind_ens false; //~should_fail
++{
++    let _ = std::mem::ManuallyDrop::new(t);
++    // Visit the shared normal return before the expected unwind failure.
++    if b {
++    } else {
++        new(true)
++    }
++}
+diff --git a/tests/rust/testsuite.mysh b/tests/rust/testsuite.mysh
+index 3c5ed1da..82f89b9a 100644
+--- a/tests/rust/testsuite.mysh
++++ b/tests/rust/testsuite.mysh
+@@ -33,6 +33,13 @@ popd
+ verifast -ignore_ref_creation -allow_assume nonnull.rs
+ verifast -skip_specless_fns nonnull_into.rs
+ cd purely_unsafe
++  cd manuallydrop_new_cfg
++    verifast forget.rs
++    verifast shared_cleanup.rs
++    verifast -allow_should_fail false_normal_post.rs
++    verifast -allow_should_fail shared_false_unwind.rs
++    [ "$(sh dead_code_pre.sh)" = $'(type)\ndead_code_pre.rs(1,1-7,2): dead code\ndead_code_pre.rs(6,13-43): dead code\ndead_code_pre.rs(6,41-42): dead code\ndead_code_pre.rs(7,2): dead code\nEXIT:1' ]
++  cd ..
+   verifast enum_discr.rs
+   verifast -ignore_unwind_paths leftpad.rs
+   verifast arrays.rs

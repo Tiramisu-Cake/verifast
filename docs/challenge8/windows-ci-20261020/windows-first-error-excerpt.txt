@@ -1,0 +1,17 @@
+2026-10-19T22:41:03.5172513Z PASS: ./tests/rust/safe_abstraction/vec/verified$ cargo verifast -allow_assume (15.47s)
+2026-10-19T22:41:06.1583203Z PASS: ./tests/rust/safe_abstraction/vec$ refinement-checker --rustc-args "--edition 2024" --ignore-directives original/lib.rs with-directives/lib.rs (17.59s)
+2026-10-19T22:41:06.2028502Z PASS: ./tests/rust/safe_abstraction/vec$ refinement-checker --rustc-args "--edition 2024" with-directives/lib.rs verified/lib.rs (17.75s)
+2026-10-19T22:41:06.2029238Z Total execution time: 93.825925 seconds
+2026-10-19T22:41:06.2029456Z
+2026-10-19T22:41:06.2030273Z FAIL: ./tests/rust/purely_unsafe/manuallydrop_new_cfg$ [ "$(verifast dead_code_pre.rs 2>&1; case_exit=$?; echo EXIT:$case_exit)" = $'(type)\ndead_code_pre.rs(1,1-7,2): dead code\ndead_code_pre.rs(6,13-43): dead code\ndead_code_pre.rs(6,41-42): dead code\ndead_code_pre.rs(7,2): dead code\nEXIT:1' ] terminated with exit code 1
+2026-10-19T22:41:06.2031336Z > (type)
+2026-10-19T22:41:06.2032054Z > dead_code_pre.rs(1,1-7,2): dead code
+2026-10-19T22:41:06.2032238Z > dead_code_pre.rs(6,13-43): dead code
+2026-10-19T22:41:06.2032378Z > dead_code_pre.rs(6,41-42): dead code
+2026-10-19T22:41:06.2032518Z > dead_code_pre.rs(7,2): dead code
+2026-10-19T22:41:06.2032622Z
+2026-10-19T22:41:06.2032668Z 1 failed processes
+2026-10-19T22:41:06.2068856Z make: *** [GNUmakefile:589: testsuite] Error 1
+2026-10-19T22:41:06.2851445Z ##[error]Process completed with exit code 1.
+2026-10-19T22:41:06.3232605Z Post job cleanup.
+2026-10-19T22:41:06.4377642Z [command]"C:\Program Files\Git\bin\git.exe" version

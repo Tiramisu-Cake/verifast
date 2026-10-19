@@ -1,35 +1,33 @@
-# Fork synchronization — SYNC_DONE / CI_FAILED (2026-10-20)
+# ManuallyDrop::new — READY_FOR_USER_REVIEW — Windows CI green (2026-10-20)
 
-Current task: [fork sync and exact-head Actions CI](CURRENT-TASK.md).
-Fork: [Tiramisu-Cake/verifast](https://github.com/Tiramisu-Cake/verifast), parent
-`verifast/verifast`; fork Actions enabled by owner authorization.
-Docs checkout `/root/verifast`: `maintenance/fork-sync-20261020` from
-`d17abbeb1d56e646743536aae998b104dbdc4181`.
-Technical checkout `/root/verifast-mdnew-final`: `fix/manuallydrop-new-cfg`,
-unchanged exact head `bf63b7dff2e053eea8541996d856fac4be11f6f1`.
-Both repos use fork `origin` and official `upstream`; final clone additionally
-preserves `/root/verifast` as `local-source`.
-[Manifest and recovery bindings](fork-sync-20261020/FORK-SYNC-MANIFEST.md).
-Two verified standalone recovery bundles preserve own original refs; foreign
-and UNKNOWN worktrees/dirty source stay untouched. Historical refs retained.
-Canonical technical branch published and independently verified by Git/API.
-Fork workflow activation required reasserting enabled=true; first push had no run.
-[CI run39335742193](https://github.com/Tiramisu-Cake/verifast/actions/runs/39335742193)
-completed FAILURE at exact bf63 on additional `ci/manuallydrop-new-cfg-20261020`:
-5/6 applicable jobs PASS (Ubuntu22/24 including Rocq, macOS, aarch64, flake-check),
-Windows Build FAIL exit1 after setup PASS; root cause UNKNOWN from allowed summaries.
-Six release/upload jobs skipped by repository/event guards (Windows also has a
-failed dependency). Run wall8m05s; sum of applicable job intervals1774s. No rerun.
-[Compact terminal evidence](fork-sync-20261020/ACTIONS-SUMMARY.json).
-This alias run differs from the requested canonical branch event; original
-canonical ref is preserved. Green readiness is not achieved. Initial docs checkpoint
-`0bd1d05bb53cb34811e66838d50690e55ee12a76` published and verified; final report on
-this same docs branch (post-push SHA receipt in the recovery directory).
-Next: explicitly authorized administrative inspection of this Windows Build
-step's first actual error; full logs were not accessed in this session.
-GCP budget/builds0; no local compilation/proof, upstream PR or consumer acceptance.
-Upstream publication still requires explicit approval of exact head/title/body;
-existing authorization covers the selected branches in the user's fork only.
+Task: [Windows CI readiness](CURRENT-TASK.md); fork `Tiramisu-Cake/verifast`.
+Docs branch `maintenance/fork-sync-20261020`; technical worktree
+`/root/verifast-mdnew-final`, branch `fix/manuallydrop-new-cfg-windows-20261020`.
+New head `ac6a63d5cad3a028e5d6f7ee4439169ba443468b`, base
+`0a83dba42db7ce0b445034ece5298afe980e57dc`, tree
+`9f3ffe26fc1439460afb1d2bbcb26f283f46276e`; Git/API publication verified.
+Original bf63 branches/reviews/body are retained unchanged.
+
+[Bounded Windows diagnosis](windows-ci-20261020/DIAGNOSIS.md): original failed
+assertion emitted all four expected diagnostics but no EXIT:1, because native
+mysh captures commands through cmd.exe. Fix only moves POSIX status capture
+into an explicit sh helper; exact expected output/status and all other controls
+remain unchanged. Translator/five Rust fixtures/workflow unchanged.
+[Independent Luna HIGH review](windows-ci-20261020/INDEPENDENT-REVIEW.md) APPROVE;
+10 synthetic controls and sh syntax PASS, actual local compilation/proof NOT_RUN.
+
+[Full fresh CI39339228464](https://github.com/Tiramisu-Cake/verifast/actions/runs/39339228464),
+push/attempt1/exact new head: SUCCESS, all6 applicable jobs PASS;6 release/upload
+jobs skipped by fork/event guards; no test jobs skipped. Wall684s (11m24s), sum
+applicable job intervals2048s, reruns0. [Compact evidence](windows-ci-20261020/ACTIONS-SUMMARY.json).
+[Fresh exact PR package](reviews/manuallydrop-new-windows-20261020/PR-DRAFT.md) ready
+for user review; body SHA256 `f16f05bc8802c9e97aa9f01b77b3a807e897a5488f6a557ed3e6a6ce3aff427f`.
+Previous approval body c1b21d03 applies only to bf63; new head/body require fresh
+review. No upstream publication/consumer acceptance. GCP0/Builds0; new CI1,
+diagnostic helper0, reruns0, active/pending0. Docs checkpoint on current branch;
+final Git/API publication SHA/end receipt `/root/verifast-windows-ci-ready-20261020/publication-final.json`.
+Old fork-sync/recovery is preserved in its
+[historical manifest](fork-sync-20261020/FORK-SYNC-MANIFEST.md).
 
 ## Historical ManuallyDrop checkpoint (2026-10-09)
 
