@@ -1,0 +1,575 @@
+{
+  "repository": "Tiramisu-Cake/verifast",
+  "captured_at_utc": "2026-10-19T22:44:07.724960+00:00",
+  "run": {
+    "id": 39335742193,
+    "html_url": "https://github.com/Tiramisu-Cake/verifast/actions/runs/39335742193",
+    "name": "CI",
+    "path": ".github/workflows/build.yml",
+    "workflow_id": 389935016,
+    "check_suite_id": 106595478661,
+    "status": "completed",
+    "conclusion": "failure",
+    "event": "push",
+    "head_branch": "ci/manuallydrop-new-cfg-20261020",
+    "head_sha": "bf63b7dff2e053eea8541996d856fac4be11f6f1",
+    "run_attempt": 1,
+    "created_at": "2026-10-19T22:33:05Z",
+    "run_started_at": "2026-10-19T22:33:05Z",
+    "updated_at": "2026-10-19T22:41:10Z"
+  },
+  "workflow_revision": {
+    "commit": "bf63b7dff2e053eea8541996d856fac4be11f6f1",
+    "tree": "687ae7dab447c94c4b87362d3d880d959c89e3de",
+    "path": ".github/workflows/build.yml",
+    "blob": "7554f15b073873fcbf154e7ea88a8cc4c42cd609"
+  },
+  "requested_branch": "fix/manuallydrop-new-cfg",
+  "run_branch_deviation": true,
+  "jobs": [
+    {
+      "id": 118344681979,
+      "name": "build_macos_aarch",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-19T22:33:13Z",
+      "completed_at": "2026-10-19T22:37:04Z",
+      "html_url": "https://github.com/Tiramisu-Cake/verifast/actions/runs/39335742193/job/118344681979",
+      "elapsed_seconds": 231,
+      "steps": [
+        {
+          "number": 1,
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-19T22:33:13Z",
+          "completed_at": "2026-10-19T22:33:15Z"
+        },
+        {
+          "number": 2,
+          "name": "Run actions/checkout@v7",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-19T22:33:15Z",
+          "completed_at": "2026-10-19T22:33:18Z"
+        },
+        {
+          "number": 3,
+          "name": "Remove conflicting Python file (issue 223)",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-19T22:33:18Z",
+          "completed_at": "2026-10-19T22:33:18Z"
+        },
+        {
+          "number": 4,
+          "name": "Build setup",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-19T22:33:18Z",
+          "completed_at": "2026-10-19T22:34:36Z"
+        },
+        {
+          "number": 5,
+          "name": "Build",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-19T22:34:36Z",
+          "completed_at": "2026-10-19T22:36:58Z"
+        },
+        {
+          "number": 6,
+          "name": "Rename artifact",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-19T22:36:58Z",
+          "completed_at": "2026-10-19T22:36:58Z"
+        },
+        {
+          "number": 7,
+          "name": "Run actions/upload-artifact@v7",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-19T22:36:58Z",
+          "completed_at": "2026-10-19T22:37:01Z"
+        },
+        {
+          "number": 8,
+          "name": "Run actions/upload-artifact@v7",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-19T22:37:01Z",
+          "completed_at": "2026-10-19T22:37:02Z"
+        },
+        {
+          "number": 16,
+          "name": "Post Run actions/checkout@v7",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-19T22:37:02Z",
+          "completed_at": "2026-10-19T22:37:02Z"
+        },
+        {
+          "number": 17,
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-19T22:37:02Z",
+          "completed_at": "2026-10-19T22:37:03Z"
+        }
+      ],
+      "check_run_id": 118344681979
+    },
+    {
+      "id": 118344682202,
+      "name": "flake-check",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-19T22:33:09Z",
+      "completed_at": "2026-10-19T22:38:57Z",
+      "html_url": "https://github.com/Tiramisu-Cake/verifast/actions/runs/39335742193/job/118344682202",
+      "elapsed_seconds": 348,
+      "steps": [
+        {
+          "number": 1,
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-19T22:33:10Z",
+          "completed_at": "2026-10-19T22:33:11Z"
+        },
+        {
+          "number": 2,
+          "name": "Run actions/checkout@v7",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-19T22:33:11Z",
+          "completed_at": "2026-10-19T22:33:13Z"
+        },
+        {
+          "number": 3,
+          "name": "Run cachix/install-nix-action@v31",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-19T22:33:13Z",
+          "completed_at": "2026-10-19T22:33:18Z"
+        },
+        {
+          "number": 4,
+          "name": "Run cachix/cachix-action@v17",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-19T22:33:18Z",
+          "completed_at": "2026-10-19T22:33:20Z"
+        },
+        {
+          "number": 5,
+          "name": "Run nix flake check --all-systems -L --extra-experimental-features 'nix-command flakes'",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-19T22:33:20Z",
+          "completed_at": "2026-10-19T22:38:54Z"
+        },
+        {
+          "number": 9,
+          "name": "Post Run cachix/cachix-action@v17",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-19T22:38:54Z",
+          "completed_at": "2026-10-19T22:38:54Z"
+        },
+        {
+          "number": 10,
+          "name": "Post Run actions/checkout@v7",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-19T22:38:54Z",
+          "completed_at": "2026-10-19T22:38:55Z"
+        },
+        {
+          "number": 11,
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-19T22:38:55Z",
+          "completed_at": "2026-10-19T22:38:55Z"
+        }
+      ],
+      "check_run_id": 118344682202
+    },
+    {
+      "id": 118344682332,
+      "name": "check_aarch64_linux_stopwatch",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-19T22:33:09Z",
+      "completed_at": "2026-10-19T22:33:26Z",
+      "html_url": "https://github.com/Tiramisu-Cake/verifast/actions/runs/39335742193/job/118344682332",
+      "elapsed_seconds": 17,
+      "steps": [
+        {
+          "number": 1,
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-19T22:33:10Z",
+          "completed_at": "2026-10-19T22:33:11Z"
+        },
+        {
+          "number": 2,
+          "name": "Run actions/checkout@v7",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-19T22:33:11Z",
+          "completed_at": "2026-10-19T22:33:12Z"
+        },
+        {
+          "number": 3,
+          "name": "Install aarch64 cross-compiler",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-19T22:33:12Z",
+          "completed_at": "2026-10-19T22:33:24Z"
+        },
+        {
+          "number": 4,
+          "name": "Cross-compile stopwatch for aarch64 Linux",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-19T22:33:24Z",
+          "completed_at": "2026-10-19T22:33:24Z"
+        },
+        {
+          "number": 8,
+          "name": "Post Run actions/checkout@v7",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-19T22:33:24Z",
+          "completed_at": "2026-10-19T22:33:24Z"
+        },
+        {
+          "number": 9,
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-19T22:33:24Z",
+          "completed_at": "2026-10-19T22:33:24Z"
+        }
+      ],
+      "check_run_id": 118344682332
+    },
+    {
+      "id": 118344682353,
+      "name": "build_ubuntu",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-19T22:33:09Z",
+      "completed_at": "2026-10-19T22:39:32Z",
+      "html_url": "https://github.com/Tiramisu-Cake/verifast/actions/runs/39335742193/job/118344682353",
+      "elapsed_seconds": 383,
+      "steps": [
+        {
+          "number": 1,
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-19T22:33:10Z",
+          "completed_at": "2026-10-19T22:33:11Z"
+        },
+        {
+          "number": 2,
+          "name": "Run actions/checkout@v7",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-19T22:33:11Z",
+          "completed_at": "2026-10-19T22:33:14Z"
+        },
+        {
+          "number": 3,
+          "name": "Build setup",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-19T22:33:14Z",
+          "completed_at": "2026-10-19T22:35:32Z"
+        },
+        {
+          "number": 4,
+          "name": "Build",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-19T22:35:32Z",
+          "completed_at": "2026-10-19T22:39:27Z"
+        },
+        {
+          "number": 5,
+          "name": "Rename artifact",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-19T22:39:27Z",
+          "completed_at": "2026-10-19T22:39:27Z"
+        },
+        {
+          "number": 6,
+          "name": "Run actions/upload-artifact@v7",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-19T22:39:27Z",
+          "completed_at": "2026-10-19T22:39:31Z"
+        },
+        {
+          "number": 12,
+          "name": "Post Run actions/checkout@v7",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-19T22:39:31Z",
+          "completed_at": "2026-10-19T22:39:31Z"
+        },
+        {
+          "number": 13,
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-19T22:39:31Z",
+          "completed_at": "2026-10-19T22:39:31Z"
+        }
+      ],
+      "check_run_id": 118344682353
+    },
+    {
+      "id": 118344682422,
+      "name": "build_ubuntu_24",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-19T22:33:09Z",
+      "completed_at": "2026-10-19T22:38:24Z",
+      "html_url": "https://github.com/Tiramisu-Cake/verifast/actions/runs/39335742193/job/118344682422",
+      "elapsed_seconds": 315,
+      "steps": [
+        {
+          "number": 1,
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-19T22:33:10Z",
+          "completed_at": "2026-10-19T22:33:10Z"
+        },
+        {
+          "number": 2,
+          "name": "Run actions/checkout@v7",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-19T22:33:10Z",
+          "completed_at": "2026-10-19T22:33:13Z"
+        },
+        {
+          "number": 3,
+          "name": "Build setup",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-19T22:33:13Z",
+          "completed_at": "2026-10-19T22:35:35Z"
+        },
+        {
+          "number": 4,
+          "name": "Build",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-19T22:35:35Z",
+          "completed_at": "2026-10-19T22:38:22Z"
+        },
+        {
+          "number": 8,
+          "name": "Post Run actions/checkout@v7",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-19T22:38:22Z",
+          "completed_at": "2026-10-19T22:38:22Z"
+        },
+        {
+          "number": 9,
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-19T22:38:22Z",
+          "completed_at": "2026-10-19T22:38:22Z"
+        }
+      ],
+      "check_run_id": 118344682422
+    },
+    {
+      "id": 118344682458,
+      "name": "build_windows",
+      "status": "completed",
+      "conclusion": "failure",
+      "started_at": "2026-10-19T22:33:09Z",
+      "completed_at": "2026-10-19T22:41:09Z",
+      "html_url": "https://github.com/Tiramisu-Cake/verifast/actions/runs/39335742193/job/118344682458",
+      "elapsed_seconds": 480,
+      "steps": [
+        {
+          "number": 1,
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-19T22:33:10Z",
+          "completed_at": "2026-10-19T22:33:11Z"
+        },
+        {
+          "number": 2,
+          "name": "Run actions/checkout@v7",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-19T22:33:11Z",
+          "completed_at": "2026-10-19T22:33:17Z"
+        },
+        {
+          "number": 3,
+          "name": "Build setup",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-19T22:33:17Z",
+          "completed_at": "2026-10-19T22:36:40Z"
+        },
+        {
+          "number": 4,
+          "name": "Build",
+          "status": "completed",
+          "conclusion": "failure",
+          "started_at": "2026-10-19T22:36:40Z",
+          "completed_at": "2026-10-19T22:41:06Z"
+        },
+        {
+          "number": 5,
+          "name": "Rename artifact",
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-10-19T22:41:06Z",
+          "completed_at": "2026-10-19T22:41:06Z"
+        },
+        {
+          "number": 6,
+          "name": "Run actions/upload-artifact@v7",
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-10-19T22:41:06Z",
+          "completed_at": "2026-10-19T22:41:06Z"
+        },
+        {
+          "number": 12,
+          "name": "Post Run actions/checkout@v7",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-19T22:41:06Z",
+          "completed_at": "2026-10-19T22:41:08Z"
+        },
+        {
+          "number": 13,
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-19T22:41:08Z",
+          "completed_at": "2026-10-19T22:41:08Z"
+        }
+      ],
+      "check_run_id": 118344682458
+    },
+    {
+      "id": 118346223023,
+      "name": "upload_macos_aarch",
+      "status": "completed",
+      "conclusion": "skipped",
+      "started_at": "2026-10-19T22:37:04Z",
+      "completed_at": "2026-10-19T22:37:04Z",
+      "html_url": "https://github.com/Tiramisu-Cake/verifast/actions/runs/39335742193/job/118346223023",
+      "elapsed_seconds": 0,
+      "steps": [],
+      "check_run_id": 118346223023
+    },
+    {
+      "id": 118346223248,
+      "name": "upload_macos_aarch_release_asset",
+      "status": "completed",
+      "conclusion": "skipped",
+      "started_at": "2026-10-19T22:37:05Z",
+      "completed_at": "2026-10-19T22:37:04Z",
+      "html_url": "https://github.com/Tiramisu-Cake/verifast/actions/runs/39335742193/job/118346223248",
+      "elapsed_seconds": 0,
+      "steps": [],
+      "check_run_id": 118346223248
+    },
+    {
+      "id": 118347164440,
+      "name": "upload_ubuntu_release_asset",
+      "status": "completed",
+      "conclusion": "skipped",
+      "started_at": "2026-10-19T22:39:32Z",
+      "completed_at": "2026-10-19T22:39:32Z",
+      "html_url": "https://github.com/Tiramisu-Cake/verifast/actions/runs/39335742193/job/118347164440",
+      "elapsed_seconds": 0,
+      "steps": [],
+      "check_run_id": 118347164440
+    },
+    {
+      "id": 118347164833,
+      "name": "upload_ubuntu",
+      "status": "completed",
+      "conclusion": "skipped",
+      "started_at": "2026-10-19T22:39:32Z",
+      "completed_at": "2026-10-19T22:39:32Z",
+      "html_url": "https://github.com/Tiramisu-Cake/verifast/actions/runs/39335742193/job/118347164833",
+      "elapsed_seconds": 0,
+      "steps": [],
+      "check_run_id": 118347164833
+    },
+    {
+      "id": 118347781131,
+      "name": "upload_windows_release_asset",
+      "status": "completed",
+      "conclusion": "skipped",
+      "started_at": "2026-10-19T22:41:09Z",
+      "completed_at": "2026-10-19T22:41:09Z",
+      "html_url": "https://github.com/Tiramisu-Cake/verifast/actions/runs/39335742193/job/118347781131",
+      "elapsed_seconds": 0,
+      "steps": [],
+      "check_run_id": 118347781131
+    },
+    {
+      "id": 118347782075,
+      "name": "upload_windows",
+      "status": "completed",
+      "conclusion": "skipped",
+      "started_at": "2026-10-19T22:41:10Z",
+      "completed_at": "2026-10-19T22:41:09Z",
+      "html_url": "https://github.com/Tiramisu-Cake/verifast/actions/runs/39335742193/job/118347782075",
+      "elapsed_seconds": 0,
+      "steps": [],
+      "check_run_id": 118347782075
+    }
+  ],
+  "windows_failure_annotations": [
+    {
+      "path": ".github",
+      "start_line": 2062,
+      "end_line": 2062,
+      "annotation_level": "failure",
+      "title": "",
+      "message": "Process completed with exit code 1."
+    }
+  ],
+  "timing": {
+    "run_duration_ms": 485000,
+    "source": "GitHub Actions timing API; wall duration, not GCP seconds or CPU charge"
+  },
+  "root_cause": "UNKNOWN: annotation only reports exit code 1; check output summary/text null; full logs not accessed",
+  "reruns": 0,
+  "logs_downloaded": false,
+  "applicable_job_elapsed_seconds_sum": 1774,
+  "failed_check_output": {
+    "title": null,
+    "summary": null,
+    "text": null,
+    "annotations_count": 1,
+    "annotations_url": "https://api.github.com/repos/Tiramisu-Cake/verifast/check-runs/118344682458/annotations"
+  },
+  "checks_match_all_job_ids_and_conclusions": true
+}

@@ -1,4 +1,4 @@
-# Fork synchronization — IN_PROGRESS (2026-10-20)
+# Fork synchronization — SYNC_DONE / CI_FAILED (2026-10-20)
 
 Current task: [fork sync and exact-head Actions CI](CURRENT-TASK.md).
 Fork: [Tiramisu-Cake/verifast](https://github.com/Tiramisu-Cake/verifast), parent
@@ -15,9 +15,18 @@ and UNKNOWN worktrees/dirty source stay untouched. Historical refs retained.
 Canonical technical branch published and independently verified by Git/API.
 Fork workflow activation required reasserting enabled=true; first push had no run.
 [CI run39335742193](https://github.com/Tiramisu-Cake/verifast/actions/runs/39335742193)
-is in progress at exact bf63 on additional `ci/manuallydrop-new-cfg-20261020`.
+completed FAILURE at exact bf63 on additional `ci/manuallydrop-new-cfg-20261020`:
+5/6 applicable jobs PASS (Ubuntu22/24 including Rocq, macOS, aarch64, flake-check),
+Windows Build FAIL exit1 after setup PASS; root cause UNKNOWN from allowed summaries.
+Six release/upload jobs skipped by repository/event guards (Windows also has a
+failed dependency). Run wall8m05s; sum of applicable job intervals1774s. No rerun.
+[Compact terminal evidence](fork-sync-20261020/ACTIONS-SUMMARY.json).
 This alias run differs from the requested canonical branch event; original
-canonical ref is preserved. Terminal Actions evidence/docs publication pending.
+canonical ref is preserved. Green readiness is not achieved. Initial docs checkpoint
+`0bd1d05bb53cb34811e66838d50690e55ee12a76` published and verified; final report on
+this same docs branch (post-push SHA receipt in the recovery directory).
+Next: explicitly authorized administrative inspection of this Windows Build
+step's first actual error; full logs were not accessed in this session.
 GCP budget/builds0; no local compilation/proof, upstream PR or consumer acceptance.
 Upstream publication still requires explicit approval of exact head/title/body;
 existing authorization covers the selected branches in the user's fork only.
