@@ -94,7 +94,7 @@ candidate SHA.
 
 Сохранять upstream требования из `README.txt`: стиль, просмотр diff, тест для
 изменения поведения, build и test suite. Для технического принятия запускать
-их в разрешённом Cloud, сначала минимальный пример и целевые регрессии, затем
+их в разрешённом Cloud Build или GitHub Actions CI, сначала минимальный пример и целевые регрессии, затем
 нужный общий suite. Положительный тест дополнить отрицательным, когда меняется
 граница допустимости. После достаточных checks не повторять их без причины.
 Локальный экспериментальный commit до Cloud checks допустим как candidate
@@ -156,10 +156,18 @@ proof runner, source extractor, dependency installer или Cloud dispatch;
 
 Компиляция VeriFast/Rust, Cargo build/check/test, rustc, VeriFast, Kani/CBMC,
 bootstrap/x.py, proof runners/extractors и полноценные tool-regressions выполняются
-в Cloud, включая wrappers/containers. Не ставить тяжёлые build dependencies
-на VPS. GitHub Actions также требуют отдельного явного разрешения.
+в Cloud Build или в разрешённом GitHub Actions CI, включая wrappers/containers.
+На VPS такие вычисления и тяжёлые build dependencies запрещены. **Владелец2026-10-20
+разрешил GitHub Actions для owner verifast и готовых tool-патчей в Tiramisu-Cake/verifast.**
+Использовать existing fork workflows/exact candidate; CI не отключать ради push.
+Это не разрешает Select/Merge запускать свои proof-сессии в Actions, менять CI
+официального upstream или создавать PR без отдельного поручения. Перед передачей
+upstream-пакета добиваться green применимых fork CI jobs; skips документировать.
+GCP budget/ledger и Actions runs/durations учитывать отдельно. Читать компактные
+run/job/step/check summaries/annotations; Actions run ID не является GCP Build UUID,
+full-log архивы не скачивать. Scope/timebox Actions задаёт текущее поручение.
 
-Стабильный owner — `verifast`. Перед новой фазой и первым Build нужны отдельное
+Стабильный owner — `verifast`. Перед новой GCP-фазой и первым Cloud Build нужны отдельное
 разрешение на фазу, её собственный бюджет и ledger, проверенная lane и подключение
 к **существующему** coordinator. Исторические бюджеты, deadlines и разрешения
 `merge`/`select-sort4` не переходят этой роли. Точные infra/proof SHAs обязательны.

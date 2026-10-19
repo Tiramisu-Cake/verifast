@@ -1,4 +1,4 @@
-> **Роли SmallSort:** Select/Merge разрабатывают патчи; VeriFast maintainer принимает готовые опубликованные патчи для review/регрессий/интеграции/upstream-пакета. Новый proof-blocker/model design ему автоматически не передаётся. [Границы роли](/root/verify-rust-std-evidence-brief/research/challenge-8/VERIFAST-ROLE.md).
+> **Роли SmallSort:** Select/Merge разрабатывают патчи; VeriFast maintainer принимает готовые опубликованные патчи для review/регрессий/интеграции/upstream-пакета. Новый proof-blocker/model design ему автоматически не передаётся. [Границы роли](/root/verify-rust-std-evidence-brief/research/challenge-8/VERIFAST-ROLE.md). Только роли verifast разрешён GitHub Actions CI готовых tool-патчей в Tiramisu-Cake/verifast; Select/Merge сохраняют Cloud Build lanes.
 
 > **Evidence v0.11 — приоритет:** [краткий guide](/root/SMALLSORT-BRIEF-AGENT-GUIDE-RU.md). Brief → catalogue → refresh/info → locate/fragment → нужные страницы по next_offset/next_value_start. Пожизненной16-квоты и прежних лексических WITHHELD больше нет; соседний контекст/argv/environment читаются как данные. Не выгружать автоматически всё. Proof scope, T0, окна/бюджеты и coordinator сохраняются.
 
@@ -45,8 +45,12 @@ proof-агентам в `verify-rust-std`. Их деревья читать че
 На VPS разрешены редактирование, Git, чтение evidence, hashing, syntax/static
 parsing и только малые изолированные tests служебных классификаторов по
 WORK-POLICY. Компиляция VeriFast/Rust, proof execution и полноценные регрессии —
-только в Cloud; тяжёлые build dependencies на VPS не устанавливать.
-Для каждой новой сессии owner `verifast` нужны отдельные разрешённые фаза, бюджет, ledger и
+в Cloud Build либо в явно разрешённом GitHub Actions CI для owner verifast в
+Tiramisu-Cake/verifast; стандартный CI форка разрешён владельцем2026-10-20.
+Select/Merge остаются в своих Cloud lanes. На VPS тяжёлые build dependencies,
+компиляция/proof execution запрещены. Actions evidence — компактные run/job/check
+summaries, без full-log скачивания; smallsort-brief относится к GCP Builds.
+Для каждой новой GCP-сессии owner `verifast` нужны отдельные разрешённые фаза, бюджет, ledger и
 подключение к существующему coordinator: максимум три queued/running/unresolved
 Build суммарно и один на owner/ledger. Исторические бюджеты не наследуются.
 
