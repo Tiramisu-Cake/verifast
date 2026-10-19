@@ -1,3 +1,33 @@
+# Fork synchronization — IN_PROGRESS (2026-10-20)
+
+Current task: [fork sync and exact-head Actions CI](CURRENT-TASK.md).
+Fork: [Tiramisu-Cake/verifast](https://github.com/Tiramisu-Cake/verifast), parent
+`verifast/verifast`; fork Actions enabled by owner authorization.
+Docs checkout `/root/verifast`: `maintenance/fork-sync-20261020` from
+`d17abbeb1d56e646743536aae998b104dbdc4181`.
+Technical checkout `/root/verifast-mdnew-final`: `fix/manuallydrop-new-cfg`,
+unchanged exact head `bf63b7dff2e053eea8541996d856fac4be11f6f1`.
+Both repos use fork `origin` and official `upstream`; final clone additionally
+preserves `/root/verifast` as `local-source`.
+[Manifest and recovery bindings](fork-sync-20261020/FORK-SYNC-MANIFEST.md).
+Two verified standalone recovery bundles preserve own original refs; foreign
+and UNKNOWN worktrees/dirty source stay untouched. Historical refs retained.
+Canonical technical branch published and independently verified by Git/API.
+Fork workflow activation required reasserting enabled=true; first push had no run.
+[CI run39335742193](https://github.com/Tiramisu-Cake/verifast/actions/runs/39335742193)
+is in progress at exact bf63 on additional `ci/manuallydrop-new-cfg-20261020`.
+This alias run differs from the requested canonical branch event; original
+canonical ref is preserved. Terminal Actions evidence/docs publication pending.
+GCP budget/builds0; no local compilation/proof, upstream PR or consumer acceptance.
+Upstream publication still requires explicit approval of exact head/title/body;
+existing authorization covers the selected branches in the user's fork only.
+
+## Historical ManuallyDrop checkpoint (2026-10-09)
+
+The snapshot below is historical. Its former no-fork/local-only wording and
+publication wait do not override the current fork-branch/Actions authorization.
+Original head, body, reviews and Cloud evidence retain their dated scope.
+
 # ManuallyDrop::new — READY_FOR_USER_APPROVAL
 
 Independent code/original-archive review completed without blockers, as reported
