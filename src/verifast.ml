@@ -2163,7 +2163,9 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
       let xs = List.filter (fun x -> match try_assoc x tenv with None -> false | Some (RefType _) -> false | _ -> true) xs in
       let (p, tenv') = check_asn (pn,ilist) tparams tenv p in
       let dec = (match dec with None -> None | Some(e) -> Some(check_expr_t_pure tenv' e intt)) in
+      r9_guard_state l h env "kind=loop_invariant gate=entry_before";
       consume_asn rules [] h env ghostenv env p true real_unit $. fun _ h _ _ _ ->
+      r9_guard_state l h env "kind=loop_invariant gate=entry_consumed_frame";
       let lblenv =
         List.map
           begin fun (lbl, cont) ->
@@ -2175,6 +2177,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
       let bs = List.map (fun x -> (x, get_unique_var_symb_ x (List.assoc x tenv) (List.mem x ghostenv))) (List.filter (fun x -> List.mem_assoc x env) xs) in
       let env = bs @ env in
       produce_asn env [] [] ghostenv env p real_unit None None $. fun h' ghostenv' env' ->
+      r9_guard_state l h' env' "kind=loop_invariant gate=body_produced";
       begin fun cont ->
         match dec with
           None -> cont None
@@ -2209,6 +2212,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
           econt
       end $. fun h' env ->
       let env = List.filter (fun (x, _) -> List.mem_assoc x tenv) env in
+      r9_guard_state l h' env "kind=loop_invariant gate=backedge_before";
       consume_asn rules [] h' env ghostenv env p true real_unit $. fun _ h''' _ env''' _ ->
       begin fun cont ->
       match (t_dec, dec) with
@@ -2222,7 +2226,8 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
         assert_term dec_check2 h' env''' (expr_loc dec) "Cannot prove that the loop measure remains non-negative." None;
         cont h'''
       end $. fun h''' ->
-      check_leaks h''' env endBodyLoc "Loop leaks heap chunks"
+      check_leaks h''' env endBodyLoc "Loop leaks heap chunks";
+      r9_guard_state l h''' env "kind=loop_invariant gate=backedge_checked"
     | WhileStmt (l, e, Some (LoopSpec (pre, post)), dec, ss, final_ss) ->
       if not pure then begin
         match ss with PureStmt (lp, _)::_ -> static_error lp "Pure statement not allowed here." None | _ -> ()
