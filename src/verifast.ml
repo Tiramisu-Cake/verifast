@@ -1039,6 +1039,51 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
               exclude_allocation p tp $. fun () -> exclude_live rest k
             | _ -> exclude_live rest k
             end in
+          (* Owner-authorized R8 allocation premise, explicitly default-off.
+             Bind a CURRENT physical array subrange to a unique incoming array3
+             by full pointer equality, never by numeric address equality. This
+             adds no heap chunk and does not expose hidden borrow contents. *)
+          let r8_u64 tp = match unfold_inferred_type tp with
+            Int (Unsigned, FixedWidthRank 3) -> true | _ -> false in
+          let r8_positive coef =
+            not (is_dummy_frac_term coef) &&
+            ctxt#query (ctxt#mk_real_lt real_zero coef) in
+          let r8_root p count =
+            let matches = List.filter_map (function
+              | Chunk ((g, true), [tp], coef, [base; entry_count; _], _)
+                when g == array_symb () && r8_u64 tp && r8_positive coef &&
+                     ctxt#query (ctxt#mk_eq entry_count (ctxt#mk_intlit 3)) ->
+                  let offset = List.find_opt (fun offset ->
+                    let start = if offset = 0 then base else
+                      mk_ptr_add_ l env base (ctxt#mk_intlit offset) tp in
+                    ctxt#query (ctxt#mk_eq p start) &&
+                    ctxt#query (ctxt#mk_le count (ctxt#mk_intlit (3 - offset))))
+                    [0; 1; 2] in
+                  (match offset with Some offset -> Some (base, offset) | None -> None)
+              | _ -> None) incoming in
+            match matches with [root] -> Some root | _ -> None in
+          let rec exclude_r8_arrays chunks k = match chunks with
+            [] -> k ()
+          | Chunk ((g, true), [tp], coef, [p; count; _], _) :: rest
+            when options.option_rust_owned_array_allocation_r8 &&
+                 ptr_width = LitWidth 3 && r8_u64 t &&
+                 g == array_symb () && r8_u64 tp && r8_positive coef &&
+                 ctxt#query (ctxt#mk_lt int_zero_term count) ->
+              begin match r8_root p count with
+                None -> exclude_r8_arrays rest k
+              | Some (base, offset) ->
+                  let a = mk_ptr_address addr in let b = mk_ptr_address p in
+                  let n = sizeof_core l env t in
+                  let m = ctxt#mk_mul count (sizeof_core l env tp) in
+                  let apart = ctxt#mk_or (ctxt#mk_le (ctxt#mk_add a n) b)
+                    (ctxt#mk_le (ctxt#mk_add b m) a) in
+                  Printf.eprintf
+                    "R8_OWNED_ARRAY_ALLOCATION local=%s loc=%s entry=%s current=%s count=%s coefficient=%s offset=%d current_owner=true incoming_count=3\n%!"
+                    x (Ast.string_of_loc l) (ctxt#pprint base) (ctxt#pprint p)
+                    (ctxt#pprint count) (ctxt#pprint coef) offset;
+                  assume apart $. fun () -> exclude_r8_arrays rest k
+              end
+          | _ :: rest -> exclude_r8_arrays rest k in
           let rec exclude_incoming chunks k = match chunks with
             [] -> k ()
           | (Chunk ((g, true), [tp], coef, [p; _], _) as chunk) :: rest
@@ -1050,6 +1095,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
           | _ :: rest -> exclude_incoming rest k in
           exclude_incoming h $. fun () ->
           exclude_live deferred $. fun () ->
+          exclude_r8_arrays h $. fun () ->
           let verify_ctor_call = verify_ctor_call (pn, ilist) leminfo funcmap predinstmap sizemap tenv ghostenv h env addr (Some x) in
           produce_cxx_object l (if is_const then real_half else real_unit) addr t eval_h verify_ctor_call Uninitialized true true h env $. fun h env ->
           cont h ((live_key x, addr) :: (x, addr) :: env)

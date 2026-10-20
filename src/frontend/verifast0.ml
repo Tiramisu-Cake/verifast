@@ -480,6 +480,7 @@ type options = {
   option_check_manifest: bool;
   option_vroots: (string * string) list;
   option_allow_assume: bool;
+  option_rust_owned_array_allocation_r8: bool;
   option_provides: string list;
   option_keep_provide_files: bool;
   option_safe_mode: bool; (* for invocation through web interface *)

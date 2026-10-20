@@ -530,6 +530,7 @@ let _ =
   let compileOnly = ref false in
   let isLibrary = ref false in
   let allowAssume = ref false in
+  let rustOwnedArrayAllocationR8 = ref false in
   let allowShouldFail = ref false in
   let emitManifest = ref false in
   let checkManifest = ref false in
@@ -596,6 +597,7 @@ let _ =
             ; "-c", Set compileOnly, "Compile only, do not perform link checking."
             ; "-shared", Set isLibrary, "The file is a library (i.e. no main function required)."
             ; "-allow_assume", Set allowAssume, "Allow assume(expr) annotations."
+            ; "-rust_owned_array_allocation_r8", Set rustOwnedArrayAllocationR8, "Experimental R8: fresh u64 local versus current owned u64 subrange of an entry array3; default off."
             ; "-breakpoint", String (fun path_loc -> let [path; loc_string] = String.split_on_char ':' path_loc in breakpoint := Some (path, int_of_string loc_string)), "-breakpoint myfile.c:123 causes symbolic execution to fail when it reaches line 123 of file myfile.c"
             ; "-focus", String (fun path_loc -> let [path; loc_string] = String.split_on_char ':' path_loc in focus := Some (path, int_of_string loc_string)), "-focus myfile.c:123 causes VeriFast to verify only the function/method/constructor/destructor at the specified source line"
             ; "-break_at_node", String (fun path -> targetPath := Some (path |> String.split_on_char ',' |> List.map int_of_string)), "Break when symbolic execution reaches the specified node in the execution tree."
@@ -657,6 +659,7 @@ let _ =
           option_check_manifest = !checkManifest;
           option_vroots = !vroots;
           option_allow_assume = !allowAssume;
+          option_rust_owned_array_allocation_r8 = !rustOwnedArrayAllocationR8;
           option_provides = !provides;
           option_keep_provide_files = !keepProvideFiles;
           option_safe_mode = !safe_mode;

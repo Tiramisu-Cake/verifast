@@ -1703,6 +1703,7 @@ let show_ide initialPath prover codeFont traceFont vfbindings layout javaFronten
                 option_check_manifest = false;
                 option_vroots = [crt_vroot default_bindir];
                 option_allow_assume = true;
+                option_rust_owned_array_allocation_r8 = false;
                 option_provides = [];
                 option_keep_provide_files = true;
                 option_vfbindings = !vfbindings;
