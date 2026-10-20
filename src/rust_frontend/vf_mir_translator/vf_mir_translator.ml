@@ -6227,9 +6227,10 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
           let end_readonly ref_name = call "end_ref_readonly" only_u64
             (var_arg ref_name) in
           let merge_sift = function
-            | Ast.MergeFractionsStmt (_, Ast.PointsTo
-                (_, Ast.Deref (_, Ast.Var (_, "sift")), Ast.RegularPointsTo,
-                 Ast.DummyPat)) -> true
+            | Ast.MergeFractionsStmt (_, Ast.CallExpr
+                (_, "points_to", [Ast.IdentTypeExpr (_, _, "u64")], [],
+                 [Ast.LitPat (Ast.Var (_, "sift")); Ast.DummyPat],
+                 Ast.Static)) -> true
             | _ -> false in
           let assert_sift = function
             | Ast.Assert (_, Ast.PointsTo
