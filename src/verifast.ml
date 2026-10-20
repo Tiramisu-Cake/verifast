@@ -3081,7 +3081,28 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
     begin
       match (List.memq block blocks_done, inv) with
         (true, _) when pure -> assert_false h env (l()) "Loops are not allowed in a pure context." None
-      | (true, None) -> assert_false h env (l()) "Loop invariant required." None
+      | (true, None) ->
+        (* R10 diagnostic only: inventory at the unchanged refusal. Never
+           produce/consume a chunk or modify the continuation environment. *)
+        if dialect = Some Rust && options.option_rust_owned_array_allocation_r8 &&
+           Sys.getenv_opt "SMALLSORT_R9_GUARD_TRACE" = Some "1" then begin
+          Printf.eprintf "R10_BACKEDGE at=%s heap_total=%d heap_shown=%d env_total=%d env_shown=%d\n%!"
+            (Ast.string_of_loc (l())) (List.length h) (min 96 (List.length h))
+            (List.length env) (min 128 (List.length env));
+          List.iteri (fun index (Chunk ((g, _), ts, coef, args, _)) ->
+            if index < 96 then begin
+              let name = match List.find_opt
+                (fun (_, (_, _, _, _, symb, _, _)) -> g == symb) predfammap with
+                | Some (name, _) -> name | None -> ctxt#pprint g in
+              Printf.eprintf "R10_BACKEDGE_CHUNK index=%d pred=%s types=%s coefficient=%s args=[%s]\n%!"
+                index name (String.concat "," (List.map string_of_type ts))
+                (ctxt#pprint coef) (String.concat ";" (List.map (fun t -> ctxt#pprint t) args))
+            end) h;
+          List.iteri (fun index (name, value) -> if index < 128 then
+            Printf.eprintf "R10_BACKEDGE_ENV index=%d name=%s value=%s\n%!"
+              index name (ctxt#pprint value)) env
+        end;
+        assert_false h env (l()) "Loop invariant required." None
       | (_, Some (l, inv, tenv)) ->
         reportStmtExec l;
         consume_asn rules [] h env ghostenv env inv true real_unit (fun _ h _ _ _ ->
