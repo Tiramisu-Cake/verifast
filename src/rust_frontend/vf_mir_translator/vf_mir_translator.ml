@@ -1956,6 +1956,15 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
     first_recover_stmt : Ast.stmt;
   }
 
+  type late_callback_plan = {
+    late_begin_loc : Ast.loc;
+    late_close_loc : Ast.loc;
+    late_scope_end_loc : Ast.loc;
+    late_lft : string;
+    late_close_stmt : Ast.stmt;
+    late_recover_stmt : Ast.stmt;
+  }
+
   let fresh_first_callback_stmt = function
     | Ast.PureStmt (loc, Ast.BlockStmt (block_loc, decls, stmts, close_loc, _)) ->
         Ast.PureStmt (loc,
@@ -1975,6 +1984,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
     val callback_recover : Ast.stmt option
     val callback_scope_start : Ast.loc option
     val first_callback : first_callback_plan option
+    val late_callback : late_callback_plan option
   end) =
   struct
     type hrtb_callback_referent = HrtbParam of string | HrtbU64
@@ -1989,12 +1999,15 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
       let callback_recover = Args.callback_recover
       let callback_scope_start = Args.callback_scope_start
       let first_callback = Args.first_callback
+      let late_callback = Args.late_callback
       let first_callback_used = ref false
       let first_callback_call_loc = ref None
       let first_callback_normal_target = ref None
       let first_fnmut_calls :
           (Ast.loc * [ `Continue | `Cleanup | `Other ]) list ref = ref []
       let first_callback_unwind_label = "#merge_first_callback_unwind"
+      let late_callback_call : (Ast.loc * string * string) option ref = ref None
+      let late_callback_used = ref false
       let callback_used = ref false
       let callback_call_loc = ref None
       let fnmut_call_count = ref 0
@@ -3035,6 +3048,59 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
             else None
         | _ -> None
       in
+      let late_callback_cleanup =
+        match State.late_callback, fn_call_rexpr with
+        | Some plan,
+          FnCallOutcome (Ast.CallExpr (_, name, targs, [], args, Ast.Static))
+          when canonicalize_item_name name = "std::ops::FnMut::call_mut" ->
+            let u64 = function
+              | Ast.ManifestTypeExpr (_, Ast.Int (Ast.Unsigned, Ast.FixedWidthRank 3)) -> true
+              | _ -> false in
+            let typed_call =
+              match targs, args with
+              | [Ast.IdentTypeExpr (_, None, "F");
+                 Ast.StructTypeExpr (_, Some "std_tuple_2_", None, [],
+                   [Ast.RustRefTypeExpr (_, Ast.IdentTypeExpr (_, None, lft1),
+                      Ast.Shared, t1);
+                    Ast.RustRefTypeExpr (_, Ast.IdentTypeExpr (_, None, lft2),
+                      Ast.Shared, t2)]);
+                 Ast.IdentTypeExpr (_, None, lft3)],
+                [Ast.LitPat (Ast.Var _); Ast.LitPat (Ast.Var _)] ->
+                  lft1 = plan.late_lft && lft2 = plan.late_lft &&
+                  lft3 = plan.late_lft && u64 t1 && u64 t2
+              | _ -> false in
+            let (call_file, call_end_line, _) = snd (Ast.lexed_loc loc) in
+            let ((_, close_line, _), _) = Ast.lexed_loc plan.late_close_loc in
+            let cleanup_id =
+              match UnwindActionRd.get (unwind_action_get fn_call_data_cpn) with
+              | UnwindActionRd.Cleanup target ->
+                  Some (translate_basic_block_id target)
+              | _ -> None in
+            if close_line <> call_end_line + 1 then None
+            else (
+              if !State.late_callback_used || not typed_call ||
+                 !State.pending_hrtb_projection_eq = [] ||
+                 (let ((scope_file, _, _), _) =
+                    Ast.lexed_loc plan.late_begin_loc in
+                  call_file <> scope_file) ||
+                 TranslatorArgs.ignore_unwind_paths ||
+                 (match OptionRd.get (target_get fn_call_data_cpn) with
+                  | Something _ -> false | _ -> true) ||
+                 cleanup_id = None ||
+                 (match unwind_stmts, cleanup_id with
+                  | [Ast.GotoStmt (_, target)], Some cleanup -> target <> cleanup
+                  | _ -> false) then
+                Ast.static_error loc
+                  "Late callback recovery requires the typed source FnMut Cleanup call"
+                  None;
+              State.late_callback_used := true;
+              Some (plan, Option.get cleanup_id))
+        | _ -> None
+      in
+      (match late_callback_cleanup, first_callback_cleanup, callback_cleanup with
+       | Some _, Some _, _ | Some _, _, Some _ ->
+           Ast.static_error loc "Overlapping callback recovery markers" None
+       | _ -> ());
       let* dst, dst_is_mutable =
         Rocq_writer.rocq_print_big_record_field TranslatorArgs.rocq_writer "destination" @@ fun () ->
         translate_place (destination_get fn_call_data_cpn) loc
@@ -3057,6 +3123,10 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
         | Something ptr_cpn ->
             let target_cpn = VfMirRd.of_pointer ptr_cpn in
             let dst_bblock_id = translate_basic_block_id target_cpn in
+            (match late_callback_cleanup with
+             | Some (_, cleanup_id) ->
+                 State.late_callback_call := Some (loc, dst_bblock_id, cleanup_id)
+             | None -> ());
             Rocq_writer.rocq_print_application TranslatorArgs.rocq_writer "Some" begin fun () ->
               Rocq_writer.rocq_print_argument TranslatorArgs.rocq_writer begin fun () ->
                 Rocq_writer.rocq_print_string_literal TranslatorArgs.rocq_writer dst_bblock_id
@@ -3090,33 +3160,54 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                                   [ LitPat (Var (loc, "__result")) ],
                                   Static ),
                               [ assignment (Ast.Var (loc, "__result")) ] @
-                              (match first_callback_cleanup, callback_cleanup with
-                               | Some s, None | None, Some s ->
+                              (match late_callback_cleanup,
+                                     first_callback_cleanup, callback_cleanup with
+                               | Some (plan, _), None, None ->
+                                   [Ast.PureStmt (loc, Ast.ExprStmt
+                                      (Ast.AssignExpr
+                                        (loc, Ast.Var (loc, "r7_late_unwind"),
+                                         Ast.Mutation, Ast.False loc)));
+                                    fresh_first_callback_stmt plan.late_close_stmt;
+                                    Ast.GotoStmt (loc, "#merge_late_callback_scope_end")]
+                               | None, Some s, None | None, None, Some s ->
                                    [fresh_first_callback_stmt s]
-                               | None, None -> []
-                               | Some _, Some _ ->
+                               | None, None, None -> []
+                               | Some _, _, _ | _, Some _, Some _ ->
                                    Ast.static_error loc "Overlapping callback recovery markers" None) );
                           Ast.SwitchStmtClause
                             ( loc,
                               CallExpr (loc, "unwinding", [], [], [], Static),
-                              (match first_callback_cleanup, callback_cleanup with
-                               | Some s, None ->
+                              (match late_callback_cleanup,
+                                     first_callback_cleanup, callback_cleanup with
+                               | Some (plan, _), None, None ->
+                                   [Ast.PureStmt (loc, Ast.ExprStmt
+                                      (Ast.AssignExpr
+                                        (loc, Ast.Var (loc, "r7_late_unwind"),
+                                         Ast.Mutation, Ast.True loc)));
+                                    fresh_first_callback_stmt plan.late_close_stmt;
+                                    Ast.GotoStmt
+                                      (loc, "#merge_late_callback_scope_end")]
+                               | None, Some s, None ->
                                    [fresh_first_callback_stmt s;
                                     Ast.GotoStmt (loc, State.first_callback_unwind_label)]
-                               | None, Some s ->
+                               | None, None, Some s ->
                                    [s; Ast.GotoStmt (loc, State.callback_unwind_label)]
-                               | None, None -> unwind_stmts
-                               | Some _, Some _ ->
+                               | None, None, None -> unwind_stmts
+                               | Some _, _, _ | _, Some _, Some _ ->
                                    Ast.static_error loc "Overlapping callback recovery markers" None) );
                         ] )
             in
             (match first_callback_cleanup with
              | Some _ -> State.first_callback_normal_target := Some dst_bblock_id
              | None -> ());
+            let call_target =
+              match late_callback_cleanup with
+              | Some _ -> "#merge_late_callback_scope_end"
+              | None -> dst_bblock_id in
             Ok
               ( [ call_stmt ],
-                Mir.GotoTerminator (loc, dst_bblock_id),
-                [ dst_bblock_id ] )
+                Mir.GotoTerminator (loc, call_target),
+                [ call_target ] )
         | Undefined _ -> Error (`TrFnCall "Unknown Option kind")
       in
       let full_call_stmts, targets =
@@ -3154,7 +3245,9 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                        loc,
                        ref [] );
                  ]),
-              targets @ unwind_targets )
+              targets @ (match late_callback_cleanup with
+                         | Some _ -> []
+                         | None -> unwind_targets) )
       in
       let full_call_stmts = !State.pending_hrtb_projection_eq @ full_call_stmts in
       State.pending_hrtb_projection_eq := [];
@@ -5968,10 +6061,265 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
           let loc = match ghost_stmts with stmt :: _ -> Ast.stmt_loc stmt | [] -> fn_sig_loc in
           Ast.static_error loc "Incomplete or ambiguous callback cleanup markers" None
     in
+    let late_begin_markers =
+      List.filter_map (fun stmt ->
+        match marker_stmt "late_callback_scope_begin" stmt with
+        | Some lft -> Some (Ast.stmt_loc stmt, lft)
+        | None -> None) ghost_stmts
+    in
+    let late_scope_end_markers =
+      List.filter_map (fun stmt ->
+        match marker_stmt "late_callback_scope_end" stmt with
+        | Some lft -> Some (Ast.stmt_loc stmt, lft)
+        | None -> None) ghost_stmts
+    in
+    let late_callback =
+      match late_begin_markers, marked "late_callback_close",
+            late_scope_end_markers, marked "late_callback_recover" with
+      | [], [], [], [] -> None
+      | [(begin_l, begin_lft)],
+        [(close_l, close_end, close_lft, close_commands)],
+        [(end_l, end_lft)],
+        [(recover_l, recover_end, recover_lft, recover_commands)]
+        when begin_lft = close_lft && close_lft = end_lft &&
+             end_lft = recover_lft ->
+          let source_pos l = fst (Ast.lexed_loc l) in
+          let ((begin_file, _begin_line, _), _) = Ast.lexed_loc begin_l in
+          let ((close_file, close_line, _), _) = Ast.lexed_loc close_l in
+          let ((close_end_file, close_end_line, _), _) =
+            Ast.lexed_loc close_end in
+          let ((end_file, end_line, _), _) = Ast.lexed_loc end_l in
+          let ((recover_file, recover_line, _), _) = Ast.lexed_loc recover_l in
+          let body_name = TrName.translate_def_path (def_path_get body_cpn) in
+          if not (body_name = "insert_tail" ||
+                  String.ends_with ~suffix:"::insert_tail" body_name) ||
+             not (source_pos begin_l < source_pos close_l &&
+                  source_pos close_l < source_pos end_l &&
+                  source_pos end_l < source_pos recover_l) ||
+             begin_file <> close_file || close_file <> close_end_file ||
+             close_end_file <> end_file || end_file <> recover_file ||
+             end_line <> close_end_line + 1 ||
+             recover_line <> end_line + 1 then
+            Ast.static_error begin_l
+              "Late callback markers require one ordered complete insert_tail scope"
+              None;
+          let begin_precedes_share_close =
+            let rec find = function
+              | marker :: next :: _ when Ast.stmt_loc marker = begin_l ->
+                  (match next with
+                   | Ast.PureStmt (_, Ast.ExprStmt
+                       (Ast.CallExpr (_, "r6_close_u64_share", [], [],
+                         [Ast.LitPat (Ast.Var (_, "r5_late_k"));
+                          Ast.LitPat (Ast.Var (_, "t"));
+                          Ast.LitPat (Ast.Var (_, "r4_cmp_tmp_ref"))],
+                         Ast.Static)))
+                   | Ast.ExprStmt
+                       (Ast.CallExpr (_, "r6_close_u64_share", [], [],
+                         [Ast.LitPat (Ast.Var (_, "r5_late_k"));
+                          Ast.LitPat (Ast.Var (_, "t"));
+                          Ast.LitPat (Ast.Var (_, "r4_cmp_tmp_ref"))],
+                         Ast.Static)) -> true
+                   | _ -> false)
+              | _ :: rest -> find rest
+              | [] -> false in
+            find ghost_stmts in
+          if not begin_precedes_share_close then
+            Ast.static_error begin_l
+              "Late callback type scope must begin immediately before reference-own preparation"
+              None;
+          let var name = function
+            | Ast.Var (_, found) -> found = name
+            | _ -> false in
+          let pvar name = function
+            | Ast.LitPat e -> var name e
+            | _ -> false in
+          let lifetime_token = function
+            | Ast.CallExpr (_, "lifetime_token", [], [], [p], Ast.Static) ->
+                pvar "r5_late_k" p
+            | _ -> false in
+          let token_assert coef = function
+            | Ast.Assert (_, Ast.CoefAsn (_, Ast.LitPat
+                (Ast.Operation (_, Ast.Div, [Ast.IntLit (_, n, _, _, _);
+                                             Ast.IntLit (_, d, _, _, _)])), body)) ->
+                Big_int.string_of_big_int n = "1" &&
+                Big_int.string_of_big_int d = coef && lifetime_token body
+            | Ast.Assert (_, body) when coef = "1" -> lifetime_token body
+            | _ -> false in
+          let merge_token = function
+            | Ast.MergeFractionsStmt (_, body) -> lifetime_token body
+            | _ -> false in
+          if not (match close_commands with
+            | [merge; half] -> merge_token merge && token_assert "2" half
+            | _ -> false) then
+            Ast.static_error close_l
+              "Late callback close requires the checked full-to-half token merge"
+              None;
+          let only_u64 = function
+            | [Ast.ManifestTypeExpr (_, Ast.Int (Ast.Unsigned, Ast.FixedWidthRank 3))] -> true
+            | _ -> false in
+          let full_content ref_name = function
+            | Ast.ExprCallExpr (_, Ast.TypePredExpr (_, tp, "full_borrow_content"),
+                [t; ptr]) ->
+                only_u64 [tp] && pvar "t" t && pvar ref_name ptr
+            | Ast.CallExpr (_, "u64_full_borrow_content", [], [], [t; ptr],
+                Ast.Static) -> pvar "t" t && pvar ref_name ptr
+            | _ -> false in
+          let scaled_content share ref_name = function
+            | Ast.CallExpr (_, "scaledp", [], [],
+                [Ast.LitPat coef; Ast.LitPat content], Ast.Static) ->
+                var share coef && full_content ref_name content
+            | _ -> false in
+          let call name targs args = function
+            | Ast.ExprStmt (Ast.CallExpr (_, found, found_targs, [], found_args,
+                Ast.Static)) ->
+                found = name && targs found_targs && args found_args
+            | _ -> false in
+          let no_targs = function [] -> true | _ -> false in
+          let var_arg name = function [Ast.LitPat e] -> var name e | _ -> false in
+          let borrow_end share ref_name = call "borrow_end" no_targs
+            (function [k; Ast.LitPat scaled] ->
+               pvar "r5_late_k" k && scaled_content share ref_name scaled
+             | _ -> false) in
+          let open_scaled share ref_name = function
+            | Ast.Open (_, None, "scaledp", [],
+                [Ast.LitPat coef; Ast.LitPat content], [], None) ->
+                var share coef && full_content ref_name content
+            | _ -> false in
+          let open_full share ref_name = function
+            | Ast.Open (_, None, "u64_full_borrow_content", [], [t; ptr], [],
+                Some coef) ->
+                let found = match coef with
+                  | Ast.VarPat (_, found) -> found
+                  | Ast.LitPat (Ast.Var (_, found)) -> found
+                  | _ -> "" in
+                pvar "t" t && pvar ref_name ptr && found = share
+            | _ -> false in
+          let end_readonly ref_name = call "end_ref_readonly" only_u64
+            (var_arg ref_name) in
+          let merge_sift = function
+            | Ast.MergeFractionsStmt (_, Ast.PointsTo
+                (_, Ast.Deref (_, Ast.Var (_, "sift")), Ast.RegularPointsTo,
+                 Ast.DummyPat)) -> true
+            | _ -> false in
+          let assert_sift = function
+            | Ast.Assert (_, Ast.PointsTo
+                (_, Ast.Deref (_, Ast.Var (_, "sift")), Ast.RegularPointsTo,
+                 Ast.VarPat (_, "r7_sift_current"))) -> true
+            | _ -> false in
+          let singleton_current = function
+            | Ast.CallExpr (_, "cons", [], [],
+                [Ast.LitPat value; Ast.LitPat rest], Ast.Static) ->
+                var "r7_sift_current" value && var "nil" rest
+            | _ -> false in
+          let close_sift = function
+            | Ast.Close (_, None, "array", [tp], [],
+                [Ast.LitPat (Ast.Var (_, "sift"));
+                 Ast.LitPat (Ast.IntLit (_, n, _, _, _));
+                 Ast.LitPat elems], None) ->
+                only_u64 [tp] && Big_int.string_of_big_int n = "1" &&
+                singleton_current elems
+            | _ -> false in
+          let recover_shape = function
+            | [token; end_lft;
+               tmp_end; tmp_scaled; tmp_full; tmp_readonly;
+               sift_end; sift_scaled; sift_full; sift_readonly;
+               merge; current; array] ->
+                token_assert "1" token &&
+                call "end_lifetime" no_targs
+                  (function [k] -> pvar "r5_late_k" k | _ -> false) end_lft &&
+                borrow_end "r5_tmp_share" "r4_cmp_tmp_ref" tmp_end &&
+                open_scaled "r5_tmp_share" "r4_cmp_tmp_ref" tmp_scaled &&
+                open_full "r5_tmp_share" "r4_cmp_tmp_ref" tmp_full &&
+                end_readonly "r4_cmp_tmp_ref" tmp_readonly &&
+                borrow_end "r5_sift_share" "r4_cmp_sift_ref" sift_end &&
+                open_scaled "r5_sift_share" "r4_cmp_sift_ref" sift_scaled &&
+                open_full "r5_sift_share" "r4_cmp_sift_ref" sift_full &&
+                end_readonly "r4_cmp_sift_ref" sift_readonly &&
+                merge_sift merge && assert_sift current && close_sift array
+            | _ -> false in
+          if not (recover_shape recover_commands) then
+            Ast.static_error recover_l
+              "Late callback recovery does not match the exact scoped loan return"
+              None;
+          let bindings = List.filter (function
+            | Ast.BlockStmt (_, [Ast.TypeWithTypeidDecl (_, name,
+                Ast.CallExpr (_, "typeid_of_lft", [], [], [k], Ast.Static))],
+                [], _, _) when name = begin_lft && pvar "r5_late_k" k -> true
+            | _ -> false) ghost_decl_blocks in
+          (match bindings with
+           | [_] -> ()
+           | _ -> Ast.static_error begin_l
+               "Late callback scope requires one let_lft 'late = r5_late_k binding"
+               None);
+          let outer_decl name init = function
+            | Ast.DeclStmt (l, [(_, None, found, Some expr, _)])
+            | Ast.PureStmt (l, Ast.DeclStmt (_, [(_, None, found, Some expr, _)]))
+              when found = name && init expr -> Some l
+            | _ -> None in
+          let has_begin_lifetime = function
+            | Ast.CallExpr (_, "begin_lifetime", [], [], [], Ast.Static) -> true
+            | _ -> false in
+          let is_false = function Ast.False _ -> true | _ -> false in
+          let declarations_before_begin =
+            List.filter_map (outer_decl "r5_late_k" has_begin_lifetime) ghost_stmts
+            |> List.exists (fun l -> source_pos l < source_pos begin_l) in
+          let flag_before_begin =
+            List.filter_map (outer_decl "r7_late_unwind" is_false) ghost_stmts
+            |> List.exists (fun l -> source_pos l < source_pos begin_l) in
+          if not declarations_before_begin || not flag_before_begin then
+            Ast.static_error begin_l
+              "Late callback scope requires a preceding fresh lifetime and outer unwind flag"
+              None;
+          let close_stmt = Ast.PureStmt (close_l,
+            Ast.BlockStmt (close_l, [], close_commands, close_end, ref [])) in
+          let recover_stmt = Ast.PureStmt (recover_l,
+            Ast.BlockStmt (recover_l, [], recover_commands, recover_end, ref [])) in
+          Some {late_begin_loc = begin_l; late_close_loc = close_l;
+                late_scope_end_loc = end_l; late_lft = begin_lft;
+                late_close_stmt = close_stmt; late_recover_stmt = recover_stmt}
+      | _ ->
+          let loc = match ghost_stmts with stmt :: _ -> Ast.stmt_loc stmt | [] -> fn_sig_loc in
+          Ast.static_error loc "Incomplete or ambiguous late callback markers" None
+    in
     if first_callback <> None && callback_close <> None then
       Ast.static_error fn_sig_loc "Overlapping callback recovery protocols" None;
-    let strict_lft_scope_ends = strict_lft_scope_ends @ first_strict_scope_ends in
+    if late_callback <> None && (first_callback = None || callback_close <> None) then
+      Ast.static_error fn_sig_loc
+        "Late callback recovery requires the existing first callback protocol alone"
+        None;
+    let late_strict_scope_ends =
+      match late_callback with
+      | Some plan -> [(plan.late_scope_end_loc, plan.late_lft)]
+      | None -> [] in
+    let strict_lft_scope_ends =
+      strict_lft_scope_ends @ first_strict_scope_ends @ late_strict_scope_ends in
     let source_pos l = fst (Ast.lexed_loc l) in
+    let ghost_decl_blocks =
+      match late_callback with
+      | None -> ghost_decl_blocks
+      | Some plan ->
+          let found = ref 0 in
+          let blocks = List.map (function
+            | Ast.BlockStmt (start, decls, [], close, _)
+              when List.exists (function
+                | Ast.TypeWithTypeidDecl (_, name,
+                    Ast.CallExpr (_, "typeid_of_lft", [], [], [Ast.LitPat (Ast.Var (_, "r5_late_k"))], Ast.Static))
+                  -> name = plan.late_lft
+                | _ -> false) decls ->
+                  if source_pos start >= source_pos plan.late_begin_loc ||
+                     source_pos plan.late_begin_loc >= source_pos close then
+                    Ast.static_error plan.late_begin_loc
+                      "Late callback let_lft binding is outside its source loop scope"
+                      None;
+                  incr found;
+                  Ast.BlockStmt (plan.late_begin_loc, decls, [], close, ref [])
+            | block -> block) ghost_decl_blocks in
+          if !found <> 1 then
+            Ast.static_error fn_sig_loc
+              "Late callback recovery could not relocate exactly one let_lft declaration"
+              None;
+          blocks
+    in
     let ghost_stmts =
       List.map (fun stmt ->
         let l = Ast.stmt_loc stmt in
@@ -5979,13 +6327,19 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
             | Some plan -> l = plan.first_close_loc ||
                 block_marker "first_callback_recover" stmt <> None
             | None -> false) then Ast.NoopStmt l
-        else match callback_close, callback_recover with
-        | Some (close_l, _, _), Some recover_stmt when l = close_l -> Ast.NoopStmt l
-        | Some _, Some recover_stmt ->
-            (match block_marker "callback_recover" stmt with
-             | Some _ -> recover_stmt
-             | None -> stmt)
-        | _ -> stmt) ghost_stmts
+        else match late_callback with
+        | Some plan when l = plan.late_begin_loc || l = plan.late_close_loc ||
+                         l = plan.late_scope_end_loc ||
+                         block_marker "late_callback_recover" stmt <> None ->
+            Ast.NoopStmt l
+        | _ ->
+            (match callback_close, callback_recover with
+             | Some (close_l, _, _), Some _ when l = close_l -> Ast.NoopStmt l
+             | Some _, Some recover_stmt ->
+                 (match block_marker "callback_recover" stmt with
+                  | Some _ -> recover_stmt
+                  | None -> stmt)
+             | _ -> stmt)) ghost_stmts
       |> List.filter (fun stmt ->
            not (List.exists (fun (cut_l, _) -> Ast.stmt_loc stmt = cut_l)
                   strict_lft_scope_ends))
@@ -6024,7 +6378,9 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
              | _ -> false) decls &&
            source_pos l < source_pos cut_l && source_pos cut_l < source_pos closeBraceLoc)
            strict_lft_scope_ends with
-         | Some (cut_l, _) when List.mem_assoc cut_l first_strict_scope_ends ->
+         | Some (cut_l, _) when
+             List.mem_assoc cut_l first_strict_scope_ends ||
+             List.mem_assoc cut_l late_strict_scope_ends ->
              [Ast.NoopStmt cut_l; Ast.NoopStmt closeBraceLoc]
          | Some (cut_l, _) -> [end_stmt cut_l; Ast.NoopStmt closeBraceLoc]
          | None -> [end_stmt closeBraceLoc]
@@ -6058,6 +6414,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
       let callback_recover = callback_recover
       let callback_scope_start = callback_scope_start
       let first_callback = first_callback
+      let late_callback = late_callback
     end) in
     let vdis_cpn = var_debug_info_get_list body_cpn in
     (* Since var id translation map is empty var debug info contains the plain Mir ids *)
@@ -6869,6 +7226,76 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                   [scope_end_bb; normal_recover_bb]
               | _ -> Ast.static_error fn_sig_loc
                   "First callback recovery markers did not match a call" None
+            in
+            let bblocks =
+              match State.late_callback, !State.late_callback_call with
+              | None, None -> bblocks
+              | Some plan, Some (call_loc, normal_target, cleanup_target)
+                when !State.late_callback_used &&
+                     (match State.first_callback,
+                            !State.first_callback_call_loc,
+                            !State.first_callback_normal_target with
+                      | Some _, Some _, Some _ -> true | _ -> false) ->
+                  let source_cleanup = List.find_opt (fun block ->
+                    translate_basic_block_id (BasicBlockRd.id_get block) = cleanup_target)
+                    bblocks_cpn in
+                  (match source_cleanup with
+                   | Some block when BasicBlockRd.is_cleanup_get block -> ()
+                   | _ -> Ast.static_error call_loc
+                       "Late callback Cleanup target is missing or not a cleanup block"
+                       None);
+                  let has_block id = List.exists
+                    (fun (bb : Mir.basic_block) -> bb.id = id) bblocks in
+                  if not (has_block normal_target && has_block cleanup_target) then
+                    Ast.static_error call_loc
+                      "Late callback original normal or Cleanup target is missing" None;
+                  let scope_end_id = "#merge_late_callback_scope_end" in
+                  let recover_id = "#merge_late_callback_recover" in
+                  if List.exists (fun (bb : Mir.basic_block) ->
+                       bb.id = scope_end_id || bb.id = recover_id) bblocks then
+                    Ast.static_error call_loc
+                      "Late callback synthetic continuation collides with the MIR CFG"
+                      None;
+                  let call_bb = match List.filter (fun (bb : Mir.basic_block) ->
+                    match bb.terminator with
+                    | Mir.GotoTerminator (at, target) ->
+                        at = call_loc && target = scope_end_id
+                    | _ -> false) bblocks with
+                    | [bb] -> bb
+                    | _ -> Ast.static_error call_loc
+                        "Late callback call block is not unique" None in
+                  let reset_bb (bb : Mir.basic_block) =
+                    {bb with external_predecessor_count = 0;
+                             internal_predecessor_count = 0;
+                             walk_state = Mir.NotSeen; is_block_head = false;
+                             parent = None; children = []} in
+                  let scope_end_bb = reset_bb
+                    {call_bb with id = scope_end_id; statements = [];
+                      terminator_stmts =
+                        [Ast.ExprStmt (Ast.CallExpr
+                          (plan.late_scope_end_loc, "#ghost_decl_block_end",
+                           [], [], [], Ast.Static))];
+                      terminator = Mir.GotoTerminator
+                        (plan.late_scope_end_loc, recover_id);
+                      successors = [recover_id]} in
+                  let recover_bb = reset_bb
+                    {call_bb with id = recover_id;
+                      statements = [plan.late_recover_stmt];
+                      terminator_stmts =
+                        [Ast.IfStmt
+                          (call_loc, Ast.Var (call_loc, "r7_late_unwind"),
+                           [Ast.GotoStmt (call_loc, cleanup_target)],
+                           [Ast.GotoStmt (call_loc, normal_target)])];
+                      terminator = Mir.EncodedTerminator;
+                      successors = [cleanup_target; normal_target]} in
+                  Printf.eprintf
+                    "MERGE_LATE_CALLBACK_RECOVERY function=%s call=%s normal=%s cleanup=%s lifetime=%s\n%!"
+                    name (Ast.string_of_loc call_loc) normal_target cleanup_target
+                    plan.late_lft;
+                  bblocks @ [scope_end_bb; recover_bb]
+              | _ -> Ast.static_error fn_sig_loc
+                  "Late callback recovery markers did not match the actual Cleanup call"
+                  None
             in
             let toplevel_blocks = find_blocks bblocks in
             let vf_bblocks =
