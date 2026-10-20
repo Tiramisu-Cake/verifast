@@ -1135,6 +1135,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
             if e <> None then static_error l "Deferred MIR storage declaration has an initializer." None;
             let Some block = !blockPtr in
             if not (List.mem_assoc x !block) then block := (x, is_const_var) :: !block;
+            rocq_print_local_addr_taken !address_taken;
             let env_tp = match t with StaticArrayType _ -> t | _ -> RefType t in
             (* Receipt has exactly the owning local's lexical scope, so normal
                block filtering preserves it only while x remains in scope. *)
