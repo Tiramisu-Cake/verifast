@@ -4552,6 +4552,19 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
             | None -> toplevel_blocks := bb :: !toplevel_blocks
             | Some bb' -> bb'.children <- bb :: bb'.children)
         | Walking (k', _) ->
+            (* R10 read-only binding receipt from the same decoded Body and
+               reconstructed CFG. This is discovery, not path execution. *)
+            if Sys.getenv_opt "SMALLSORT_R9_GUARD_TRACE" = Some "1" &&
+               State.first_callback <> None && State.late_callback <> None then begin
+              let from = match path with parent :: _ -> parent.id | [] -> "NONE" in
+              let head_loc = match bb.statements @ bb.terminator_stmts with
+                | stmt :: _ -> Ast.stmt_loc stmt | [] -> Args.body_imp_loc in
+              Printf.eprintf
+                "R10_LOOP_BINDING kind=reconstructed_cfg function=%s def_hash=%s mir_fingerprint=%s mir_phase=%s body_span=%s head=%s from=%s head_loc=%s\n%!"
+                Args.body_name Args.body_def_hash Args.body_mir_fingerprint
+                Args.body_mir_phase (Ast.string_of_loc Args.body_imp_loc)
+                bb.id from (Ast.string_of_loc head_loc)
+            end;
             bb.internal_predecessor_count <- bb.internal_predecessor_count + 1;
             (*Printf.printf "Found a loop with head at rank %d: %s\n" k' (String.concat " -> " (List.map (fun (bb: basic_block) -> bb.id) (List.rev (bb::path))));*)
             bb.is_block_head <- true;
