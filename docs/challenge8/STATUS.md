@@ -1,6 +1,12 @@
-# ManuallyDrop::new — READY_FOR_USER_REVIEW — Windows CI green (2026-10-20)
+# ManuallyDrop::new — UPSTREAM_DRAFT_OPEN (2026-10-20)
 
-Task: [Windows CI readiness](CURRENT-TASK.md); fork `Tiramisu-Cake/verifast`.
+[Upstream draft PR#1046](https://github.com/verifast/verifast/pull/1046) opened
+2026-10-20T08:12:51Z on the owner's subsequent explicit request. GitHub confirms
+draft=true/open, exact head ac6a63d5 and prepared title/body SHA256 f16f05bc…aff427f.
+[Publication receipt](windows-ci-20261020/UPSTREAM-DRAFT.json). No merge/upstream
+acceptance or consumer pin acceptance is implied; no additional messages sent.
+
+Completed task: [Windows CI readiness](CURRENT-TASK.md); fork `Tiramisu-Cake/verifast`.
 Docs branch `maintenance/fork-sync-20261020`; technical worktree
 `/root/verifast-mdnew-final`, branch `fix/manuallydrop-new-cfg-windows-20261020`.
 New head `ac6a63d5cad3a028e5d6f7ee4439169ba443468b`, base
@@ -22,8 +28,9 @@ jobs skipped by fork/event guards; no test jobs skipped. Wall684s (11m24s), sum
 applicable job intervals2048s, reruns0. [Compact evidence](windows-ci-20261020/ACTIONS-SUMMARY.json).
 [Fresh exact PR package](reviews/manuallydrop-new-windows-20261020/PR-DRAFT.md) ready
 for user review; body SHA256 `f16f05bc8802c9e97aa9f01b77b3a807e897a5488f6a557ed3e6a6ce3aff427f`.
-Previous approval body c1b21d03 applies only to bf63; new head/body require fresh
-review. No upstream publication/consumer acceptance. GCP0/Builds0; new CI1,
+The owner subsequently authorized opening this exact new head/title/body as a
+draft PR. Previous bf63/body c1b21d03 snapshots retain their historical scope.
+Upstream draft is open; merge/upstream acceptance and consumer acceptance remain pending. GCP0/Builds0; new CI1,
 diagnostic helper0, reruns0, active/pending0. Docs checkpoint on current branch;
 final Git/API publication SHA/end receipt `/root/verifast-windows-ci-ready-20261020/publication-final.json`.
 Old fork-sync/recovery is preserved in its

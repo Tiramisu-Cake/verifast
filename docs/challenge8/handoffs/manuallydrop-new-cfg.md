@@ -1,4 +1,13 @@
-# Current handoff — READY_FOR_USER_REVIEW — Windows CI green
+# Current handoff — UPSTREAM_DRAFT_OPEN / PR#1046
+
+Owner explicitly requested upstream draft publication after reviewing the ready
+package. [PR#1046](https://github.com/verifast/verifast/pull/1046) created
+2026-10-20T08:12:51Z, verified draft/open, exact ac6a63d5 head and body SHA256
+f16f05bc8802c9e97aa9f01b77b3a807e897a5488f6a557ed3e6a6ce3aff427f.
+[Publication receipt](../windows-ci-20261020/UPSTREAM-DRAFT.json). This supersedes
+the earlier publication wait for this draft action only; no merge/release or
+additional external messages authorized/performed. Review-package snapshots stay
+unchanged as the prepared inputs, and upstream PR CI has its own event context.
 
 Current owner verifast; sole active maintainer submission variant:
 `/root/verifast-mdnew-final`, branch `fix/manuallydrop-new-cfg-windows-20261020`.
@@ -18,7 +27,7 @@ and sum job intervals2048s, no reruns. [Checks](../reviews/manuallydrop-new-wind
 [Fresh package](../reviews/manuallydrop-new-windows-20261020/REVIEW.md) is a new
 version ready for new exact-head/title/body review; body SHA256
 `f16f05bc8802c9e97aa9f01b77b3a807e897a5488f6a557ed3e6a6ce3aff427f`; previous approved snapshot/body
-c1b21d03 remains unchanged and does not approve this new head. No upstream PR or
+c1b21d03 remains unchanged and does not approve this new head. Upstream draft now open; no merge/upstream acceptance or
 consumer pin acceptance. GCP0; no local compiler/proof execution.
 
 ## Historical handoffs

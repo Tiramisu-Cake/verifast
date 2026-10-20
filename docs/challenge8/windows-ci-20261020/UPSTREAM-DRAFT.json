@@ -1,0 +1,16 @@
+{
+  "number": 1046,
+  "url": "https://github.com/verifast/verifast/pull/1046",
+  "draft": true,
+  "state": "open",
+  "head_repository": "Tiramisu-Cake/verifast",
+  "head_branch": "fix/manuallydrop-new-cfg-windows-20261020",
+  "head_sha": "ac6a63d5cad3a028e5d6f7ee4439169ba443468b",
+  "base_repository": "verifast/verifast",
+  "base_branch": "master",
+  "base_sha": "0a83dba42db7ce0b445034ece5298afe980e57dc",
+  "title": "[Rust] Keep ManuallyDrop::new identity successors consistent with the CFG",
+  "body_sha256": "f16f05bc8802c9e97aa9f01b77b3a807e897a5488f6a557ed3e6a6ce3aff427f",
+  "created_at": "2026-10-20T08:12:51Z",
+  "authorization": "Explicit user request in this turn to open upstream draft PR; supersedes earlier publication wait for this action only."
+}
