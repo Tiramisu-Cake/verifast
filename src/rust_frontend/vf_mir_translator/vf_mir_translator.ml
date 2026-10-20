@@ -6228,9 +6228,9 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
             (var_arg ref_name) in
           let merge_sift = function
             | Ast.MergeFractionsStmt (_, Ast.CallExpr
-                (_, "points_to", [Ast.IdentTypeExpr (_, _, "u64")], [],
+                (_, "points_to", targs, [],
                  [Ast.LitPat (Ast.Var (_, "sift")); Ast.DummyPat],
-                 Ast.Static)) -> true
+                 Ast.Static)) -> only_u64 targs
             | _ -> false in
           let assert_sift = function
             | Ast.Assert (_, Ast.PointsTo
