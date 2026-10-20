@@ -1967,6 +1967,17 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
     late_recover_stmt : Ast.stmt;
   }
 
+  type r9_guard_return_plan = {
+    r9_guard_return_loc : Ast.loc;
+    r9_guard_return_end_loc : Ast.loc;
+    r9_guard_return_commands : Ast.stmt list;
+    r9_guard_return_key : string;
+    r9_guard_return_path : string;
+    r9_guard_return_hash : string;
+    r9_guard_return_guard : string;
+    r9_guard_return_edges : (string * string * bool * string) list;
+  }
+
   let fresh_first_callback_stmt = function
     | Ast.PureStmt (loc, Ast.BlockStmt (block_loc, decls, stmts, close_loc, _)) ->
         Ast.PureStmt (loc,
@@ -1991,6 +2002,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
     val callback_scope_start : Ast.loc option
     val first_callback : first_callback_plan option
     val late_callback : late_callback_plan option
+    val r9_guard_return : r9_guard_return_plan option
   end) =
   struct
     type hrtb_callback_referent = HrtbParam of string | HrtbU64
@@ -2006,6 +2018,8 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
       let callback_scope_start = Args.callback_scope_start
       let first_callback = Args.first_callback
       let late_callback = Args.late_callback
+      let r9_guard_return = Args.r9_guard_return
+      let r9_guard_return_used : (string * string * bool * string) list ref = ref []
       let first_callback_used = ref false
       let first_callback_call_loc = ref None
       let first_callback_normal_target = ref None
@@ -3501,7 +3515,37 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
               target unwind_binding receiver_name in
             let call_stmt = Ast.SwitchStmt (loc, selected_call, [
               Ast.SwitchStmtClause (loc, call "returning" [Ast.Var (loc, "__result")],
-                finish @ r9_guard_trace loc (binding "returning"));
+                finish @
+                (match State.r9_guard_return with
+                 | Some plan
+                   when Sys.getenv_opt "SMALLSORT_R9_GUARD_RETURN_RECOVERY" = Some "1" &&
+                        generated_call = Some plan.r9_guard_return_key &&
+                        selected_path = plan.r9_guard_return_path &&
+                        selected_hash = plan.r9_guard_return_hash &&
+                        guard_path = plan.r9_guard_return_guard &&
+                        is_bare_local_get drop_data_cpn &&
+                        not (is_replace_get drop_data_cpn) && place_is_mutable &&
+                        List.mem (!State.current_block, target, !State.current_is_cleanup,
+                          LocalDeclIdRd.name_get
+                            (PlaceRd.local_get (place_get drop_data_cpn)))
+                          plan.r9_guard_return_edges ->
+                     let edge = (!State.current_block, target, !State.current_is_cleanup,
+                       LocalDeclIdRd.name_get
+                         (PlaceRd.local_get (place_get drop_data_cpn))) in
+                     if List.mem edge !State.r9_guard_return_used then
+                       Ast.static_error loc "R9 guard-return MIR edge was translated more than once" None;
+                     State.r9_guard_return_used := edge :: !State.r9_guard_return_used;
+                     r9_guard_trace loc (binding "returning recovery=before") @
+                     [Ast.PureStmt (plan.r9_guard_return_loc,
+                       Ast.BlockStmt (plan.r9_guard_return_loc, [],
+                         plan.r9_guard_return_commands,
+                         plan.r9_guard_return_end_loc, ref []))] @
+                     r9_guard_trace loc (binding "returning recovery=complete")
+                 | Some _ ->
+                     Ast.static_error loc
+                       "R9 guard-return marker is not bound to its exact selected Drop edge" None
+                 | None -> []) @
+                r9_guard_trace loc (binding "returning"));
               Ast.SwitchStmtClause (loc, call "unwinding" [],
                 finish @ r9_guard_trace loc (binding "unwinding") @ unwind_stmts)]) in
             Ok ([ghost "close_points_to" [address];
@@ -5737,6 +5781,94 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
       | _ -> None
     in
     let marked name = List.filter_map (block_marker name) ghost_stmts in
+    let r9_return_marker_stmt = function
+      | Ast.PureStmt (_, Ast.ExprStmt (Ast.CallExpr (_, "guard_current_return_recover", [], [], [], Ast.Static)))
+      | Ast.ExprStmt (Ast.CallExpr (_, "guard_current_return_recover", [], [], [], Ast.Static)) -> true
+      | _ -> false
+    in
+    let r9_unpure = function Ast.PureStmt (_, stmt) -> stmt | stmt -> stmt in
+    let r9_array_u64_open = function
+      | Ast.Open (_, _, "array",
+          [Ast.ManifestTypeExpr (_, Ast.Int (Ast.Unsigned, Ast.FixedWidthRank 3))],
+          _, _, _) -> true
+      | _ -> false
+    in
+    let r9_named_call name stmt =
+      match r9_unpure stmt with
+      | Ast.ExprStmt (Ast.CallExpr (_, found, _, _, _, Ast.Static)) -> found = name
+      | _ -> false
+    in
+    let r9_safe_command = function
+      | Ast.Assert _ -> true
+      | stmt when r9_array_u64_open stmt -> true
+      | Ast.MergeFractionsStmt _ -> true
+      | stmt when r9_named_call "end_ref_readonly" stmt -> true
+      | _ -> false
+    in
+    let r9_return_markers = List.filter_map (function
+      | Ast.PureStmt (loc, Ast.BlockStmt (_, [], head :: commands, close, _))
+        when r9_return_marker_stmt head -> Some (loc, close, List.map r9_unpure commands)
+      | _ -> None) ghost_stmts in
+    let r9_guard_return =
+      match r9_return_markers with
+      | [] -> None
+      | [(marker_loc, marker_end, commands)] ->
+          if Sys.getenv_opt "SMALLSORT_R9_GUARD_RETURN_RECOVERY" <> Some "1" then
+            Ast.static_error marker_loc
+              "R9 guard-return marker requires the explicit R9 recovery profile environment" None;
+          if commands = [] || not (List.for_all r9_safe_command commands) then
+            Ast.static_error marker_loc
+              "R9 guard-return marker contains a command outside the checked recovery whitelist" None;
+          let binding = match body_tr_defs_ctx.generated_glue with
+            | Some binding -> binding
+            | None -> Ast.static_error marker_loc
+                "R9 guard-return marker has no bound generated selected-Drop glue" None in
+          let blocks = basic_blocks_get_list body_cpn in
+          let block_ids = List.map (fun block ->
+            translate_basic_block_id (BasicBlockRd.id_get block)) blocks in
+          let bound_returning_edges = List.filter_map (fun block ->
+              let source = translate_basic_block_id (BasicBlockRd.id_get block) in
+              match TerminatorKindRd.get
+                (TerminatorRd.kind_get (BasicBlockRd.terminator_get block)) with
+              | TerminatorKindRd.Drop data
+                when TerminatorKindRd.DropData.generated_body_key_get data = binding.glue_key &&
+                     TrName.translate_def_path
+                       (TerminatorKindRd.DropData.selected_drop_path_get data) = binding.glue_selected_path &&
+                     TerminatorKindRd.DropData.selected_drop_hash_get data = binding.glue_selected_hash &&
+                     TrName.translate_def_path
+                       (TerminatorKindRd.DropData.selected_guard_path_get data) = binding.glue_guard &&
+                     List.mem (binding.glue_selected_path, binding.glue_selected_hash, binding.glue_guard)
+                       body_tr_defs_ctx.selected_drops &&
+                     TerminatorKindRd.DropData.is_bare_local_get data &&
+                     not (TerminatorKindRd.DropData.is_replace_get data) ->
+                  let target = translate_basic_block_id
+                    (TerminatorKindRd.DropData.target_get data) in
+                  if not (List.mem target block_ids) then
+                    Ast.static_error marker_loc
+                      "R9 selected Drop normal target is absent from the original MIR" None;
+                  Some (source, target, BasicBlockRd.is_cleanup_get block,
+                    LocalDeclIdRd.name_get
+                      (PlaceRd.local_get (TerminatorKindRd.DropData.place_get data)))
+              | _ -> None) blocks in
+          if bound_returning_edges = [] then
+            Ast.static_error marker_loc
+              "R9 guard-return marker requires a bound bare-local selected Drop edge" None;
+          let r9_guard_locals = List.sort_uniq String.compare
+            (List.map (fun (_, _, _, local) -> local) bound_returning_edges) in
+          if List.length r9_guard_locals <> 1 then
+            Ast.static_error marker_loc
+              "R9 guard-return marker maps to more than one selected guard local" None;
+          Some { r9_guard_return_loc = marker_loc;
+                 r9_guard_return_end_loc = marker_end;
+                 r9_guard_return_commands = commands;
+                 r9_guard_return_key = binding.glue_key;
+                 r9_guard_return_path = binding.glue_selected_path;
+                 r9_guard_return_hash = binding.glue_selected_hash;
+                 r9_guard_return_guard = binding.glue_guard;
+                 r9_guard_return_edges = bound_returning_edges }
+      | (marker_loc, _, _) :: _ ->
+          Ast.static_error marker_loc "R9 guard-return marker is ambiguous" None
+    in
     let scope_markers =
       List.filter_map (fun stmt ->
         match marker_stmt "callback_scope_end" stmt with
@@ -6363,6 +6495,33 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
       Ast.static_error fn_sig_loc
         "Late callback recovery requires the existing first callback protocol alone"
         None;
+    let r9_bound_drop_present = match body_tr_defs_ctx.generated_glue with
+      | None -> false
+      | Some binding -> List.exists (fun block ->
+          match TerminatorKindRd.get
+            (TerminatorRd.kind_get (BasicBlockRd.terminator_get block)) with
+          | TerminatorKindRd.Drop data ->
+              TerminatorKindRd.DropData.generated_body_key_get data = binding.glue_key &&
+              TrName.translate_def_path
+                (TerminatorKindRd.DropData.selected_drop_path_get data) = binding.glue_selected_path &&
+              TerminatorKindRd.DropData.selected_drop_hash_get data = binding.glue_selected_hash &&
+              TrName.translate_def_path
+                (TerminatorKindRd.DropData.selected_guard_path_get data) = binding.glue_guard &&
+              List.mem (binding.glue_selected_path, binding.glue_selected_hash, binding.glue_guard)
+                body_tr_defs_ctx.selected_drops &&
+              TerminatorKindRd.DropData.is_bare_local_get data &&
+              not (TerminatorKindRd.DropData.is_replace_get data)
+          | _ -> false) (basic_blocks_get_list body_cpn) in
+    if Sys.getenv_opt "SMALLSORT_R9_GUARD_RETURN_RECOVERY" = Some "1" &&
+       first_callback <> None && late_callback <> None && r9_bound_drop_present &&
+       r9_guard_return = None then
+      Ast.static_error fn_sig_loc
+        "R9 guard-return recovery target body is missing its checked source marker" None;
+    (match r9_guard_return with
+     | Some _ when first_callback = None || late_callback = None ->
+         Ast.static_error fn_sig_loc
+           "R9 guard-return marker requires the admitted first and late callback plans" None
+     | _ -> ());
     let late_strict_scope_ends =
       match late_callback with
       | Some plan -> [(plan.late_scope_end_loc, plan.late_lft)]
@@ -6399,7 +6558,10 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
     let ghost_stmts =
       let mapped = List.filter_map (fun stmt ->
         let l = Ast.stmt_loc stmt in
-        if (match first_callback with
+        if (match r9_guard_return with
+            | Some plan -> l = plan.r9_guard_return_loc
+            | None -> false) then Some (Ast.NoopStmt l)
+        else if (match first_callback with
             | Some plan -> l = plan.first_close_loc ||
                 block_marker "first_callback_recover" stmt <> None
             | None -> false) then Some (Ast.NoopStmt l)
@@ -6535,6 +6697,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
       let callback_scope_start = callback_scope_start
       let first_callback = first_callback
       let late_callback = late_callback
+      let r9_guard_return = r9_guard_return
     end) in
     let vdis_cpn = var_debug_info_get_list body_cpn in
     (* Since var id translation map is empty var debug info contains the plain Mir ids *)
@@ -7556,6 +7719,15 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                        "Post-retirement generated Drop control found multiple qualified Drops" None)
               | _ -> vf_bblocks
             in
+            (match State.r9_guard_return with
+             | None -> ()
+             | Some plan ->
+                 let used = List.sort compare !State.r9_guard_return_used in
+                 let expected = List.sort compare plan.r9_guard_return_edges in
+                 if used <> expected then
+                   Ast.static_error plan.r9_guard_return_loc
+                     "R9 guard-return checked commands were not attached to every exact MIR returning edge"
+                     None);
             let vf_bblocks =
               match State.callback_close, State.callback_recover, !State.callback_call_loc with
               | None, None, None -> vf_bblocks

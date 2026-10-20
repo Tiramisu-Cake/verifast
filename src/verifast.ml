@@ -187,21 +187,23 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
     let r9_guard_state at h env label =
       if dialect = Some Rust && options.option_rust_owned_array_allocation_r8 &&
          Sys.getenv_opt "SMALLSORT_R9_GUARD_TRACE" = Some "1" then begin
-        let wanted name = List.exists (fun suffix -> String.ends_with ~suffix name)
-          ["ref_readonly_end_token"; "ref_initialized"; "points_to";
-           "points_to_"; "array"; "array_"; "CopyOnDrop_drop_effect"] in
-        let selected = List.filter_map (fun (Chunk ((g, _), ts, coef, args, _)) ->
-          match List.find_opt (fun (_, (_, _, _, _, symb, _, _)) -> g == symb) predfammap with
-          | Some (name, _) when wanted name -> Some (name, ts, coef, args)
-          | _ -> None) h in
+        (* Include predicate constructors (own/foreach/type interpretation) as
+           existing symbolic terms too, so physical and logical CURRENT debt
+           can be distinguished. This only formats the input heap. *)
+        let selected = List.map (fun (Chunk ((g, _), ts, coef, args, _)) ->
+          let name = match List.find_opt
+            (fun (_, (_, _, _, _, symb, _, _)) -> g == symb) predfammap with
+            | Some (name, _) -> name
+            | None -> ctxt#pprint g in
+          (name, ts, coef, args)) h in
         let show = function Some value -> ctxt#pprint value | None -> "ABSENT" in
         let tmp = try_assoc "tmp" env in
         let live = try_assoc "$rust_storage_live$tmp" env in
         Printf.eprintf
           "R9_GUARD_EVENT at=%s %s tmp=%s storage_live=%s heap_total=%d selected_total=%d shown=%d\n%!"
           (Ast.string_of_loc at) label (show tmp) (show live)
-          (List.length h) (List.length selected) (min 24 (List.length selected));
-        List.iteri (fun index (name, ts, coef, args) -> if index < 24 then
+          (List.length h) (List.length selected) (min 48 (List.length selected));
+        List.iteri (fun index (name, ts, coef, args) -> if index < 48 then
           Printf.eprintf "R9_GUARD_CHUNK index=%d pred=%s types=%s coefficient=%s args=[%s]\n%!"
             index name (String.concat "," (List.map string_of_type ts))
             (ctxt#pprint coef) (String.concat ";" (List.map (fun t -> ctxt#pprint t) args))) selected
