@@ -1957,9 +1957,11 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
   }
 
   type late_callback_plan = {
+    late_original_decl_loc : Ast.loc;
     late_begin_loc : Ast.loc;
     late_close_loc : Ast.loc;
     late_scope_end_loc : Ast.loc;
+    late_recover_loc : Ast.loc;
     late_lft : string;
     late_close_stmt : Ast.stmt;
     late_recover_stmt : Ast.stmt;
@@ -3226,12 +3228,21 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
             in
             let phl = get_start_loc (Ast.lexed_loc call_loc) in
             let ghost_stmt =
-              List.find
+              match List.find_opt
                 (fun gs ->
                   let gsl = get_start_loc Ast.(gs |> stmt_loc |> lexed_loc) in
-                  let (gsl_l, gsl_c), (phl_l, phl_c) = (gsl, phl) in
+                  let gsl_l, _ = gsl in
+                  let phl_l, _ = phl in
                   gsl_l = phl_l)
-                !State.ghost_stmts
+                !State.ghost_stmts with
+              | Some stmt -> stmt
+              | None ->
+                  let line, column = phl in
+                  Ast.static_error call_loc
+                    (Printf.sprintf
+                      "No translated ghost statement matches compiler ghost command at source %d:%d"
+                      line column)
+                    None
             in
             ([ ghost_stmt ], targets)
         | _ ->
@@ -6246,11 +6257,12 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                 Ast.CallExpr (_, "typeid_of_lft", [], [], [k], Ast.Static))],
                 [], _, _) when name = begin_lft && pvar "r5_late_k" k -> true
             | _ -> false) ghost_decl_blocks in
-          (match bindings with
-           | [_] -> ()
-           | _ -> Ast.static_error begin_l
+          let original_decl_loc =
+            match bindings with
+            | [Ast.BlockStmt (start, _, _, _, _)] -> start
+            | _ -> Ast.static_error begin_l
                "Late callback scope requires one let_lft 'late = r5_late_k binding"
-               None);
+               None in
           let outer_decl name init = function
             | Ast.DeclStmt (l, [(_, None, found, Some expr, _)])
             | Ast.PureStmt (l, Ast.DeclStmt (_, [(_, None, found, Some expr, _)]))
@@ -6274,8 +6286,10 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
             Ast.BlockStmt (close_l, [], close_commands, close_end, ref [])) in
           let recover_stmt = Ast.PureStmt (recover_l,
             Ast.BlockStmt (recover_l, [], recover_commands, recover_end, ref [])) in
-          Some {late_begin_loc = begin_l; late_close_loc = close_l;
-                late_scope_end_loc = end_l; late_lft = begin_lft;
+          Some {late_original_decl_loc = original_decl_loc;
+                late_begin_loc = begin_l; late_close_loc = close_l;
+                late_scope_end_loc = end_l; late_recover_loc = recover_l;
+                late_lft = begin_lft;
                 late_close_stmt = close_stmt; late_recover_stmt = recover_stmt}
       | _ ->
           let loc = match ghost_stmts with stmt :: _ -> Ast.stmt_loc stmt | [] -> fn_sig_loc in
@@ -6321,28 +6335,31 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
           blocks
     in
     let ghost_stmts =
-      List.map (fun stmt ->
+      let mapped = List.filter_map (fun stmt ->
         let l = Ast.stmt_loc stmt in
         if (match first_callback with
             | Some plan -> l = plan.first_close_loc ||
                 block_marker "first_callback_recover" stmt <> None
-            | None -> false) then Ast.NoopStmt l
+            | None -> false) then Some (Ast.NoopStmt l)
         else match late_callback with
-        | Some plan when l = plan.late_begin_loc || l = plan.late_close_loc ||
-                         l = plan.late_scope_end_loc ||
+        | Some plan when l = plan.late_begin_loc -> None
+        | Some plan when l = plan.late_close_loc || l = plan.late_scope_end_loc ||
                          block_marker "late_callback_recover" stmt <> None ->
-            Ast.NoopStmt l
+            Some (Ast.NoopStmt l)
         | _ ->
             (match callback_close, callback_recover with
-             | Some (close_l, _, _), Some _ when l = close_l -> Ast.NoopStmt l
+             | Some (close_l, _, _), Some _ when l = close_l -> Some (Ast.NoopStmt l)
              | Some _, Some recover_stmt ->
                  (match block_marker "callback_recover" stmt with
-                  | Some _ -> recover_stmt
-                  | None -> stmt)
-             | _ -> stmt)) ghost_stmts
-      |> List.filter (fun stmt ->
+                  | Some _ -> Some recover_stmt
+                  | None -> Some stmt)
+             | _ -> Some stmt)) ghost_stmts in
+      let mapped = match late_callback with
+        | Some plan -> Ast.NoopStmt plan.late_original_decl_loc :: mapped
+        | None -> mapped in
+      List.filter (fun stmt ->
            not (List.exists (fun (cut_l, _) -> Ast.stmt_loc stmt = cut_l)
-                  strict_lft_scope_ends))
+                  strict_lft_scope_ends)) mapped
     in
     let ghost_decl_block_start_stmts =
       ghost_decl_blocks
@@ -6389,6 +6406,43 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
       ListAux.try_map translate_loop_spec_block
         (loop_spec_blocks_get_list body_cpn)
     in
+    (match late_callback with
+     | None -> ()
+     | Some plan ->
+         let source_line loc =
+           let ((_, line, _), _) = Ast.lexed_loc loc in line in
+         let candidate_stmts =
+           ghost_decl_block_start_stmts @ ghost_decl_block_end_stmts @
+           loop_spec_blocks @ ghost_stmts in
+         let candidate_count loc =
+           List.length (List.filter (fun stmt ->
+             source_line (Ast.stmt_loc stmt) = source_line loc) candidate_stmts) in
+         List.iter (fun (label, loc) ->
+           if candidate_count loc <> 1 then
+             Ast.static_error loc
+               (Printf.sprintf
+                 "Late callback source placeholder %s at line %d has %d translated candidates"
+                 label (source_line loc) (candidate_count loc))
+               None)
+           ["original let_lft start", plan.late_original_decl_loc;
+            "explicit binding start", plan.late_begin_loc;
+            "late close marker", plan.late_close_loc;
+            "strict binding end", plan.late_scope_end_loc;
+            "recovery marker", plan.late_recover_loc];
+         let binding_starts = List.filter (function
+           | Ast.BlockStmt (start, decls,
+               [Ast.ExprStmt (Ast.CallExpr (_, "#ghost_decl_block_start", [], [], [], Ast.Static))],
+               close, _) ->
+               source_line start = source_line plan.late_begin_loc &&
+               source_line close = source_line plan.late_scope_end_loc &&
+               List.exists (function
+                 | Ast.TypeWithTypeidDecl (_, name, _) -> name = plan.late_lft
+                 | _ -> false) decls
+           | _ -> false) ghost_decl_block_start_stmts in
+         if List.length binding_starts <> 1 then
+           Ast.static_error plan.late_begin_loc
+             "Late callback binding does not start exactly once at its explicit source marker"
+             None);
     let stack_addr_occurrences =
       stack_addr_occurrences
       + List.fold_left
