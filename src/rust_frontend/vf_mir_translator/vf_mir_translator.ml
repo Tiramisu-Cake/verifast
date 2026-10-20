@@ -4685,6 +4685,20 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                 ],
                 Mir.EncodedTerminator )
           | _ ->
+              (* The admitted late-binding declaration must remain first in
+                 the Rust source block. Relocation leaves its exact Noop at
+                 that position; retain it inside the checked loop body while
+                 recognizing the immediately following invariant. Never cross
+                 any executable or ghost-resource statement. *)
+              let stmts =
+                match State.r9_guard_return, State.late_callback, stmts with
+                | Some _, Some plan,
+                  (Ast.NoopStmt l as placeholder) ::
+                  (Ast.PureStmt (_, InvariantStmt _) as invariant) :: rest
+                  when l = plan.late_original_decl_loc ->
+                    invariant :: placeholder :: rest
+                | _ -> stmts
+              in
               let predecessor_count, stmt =
                 match stmts with
                 | Ast.PureStmt (lp, InvariantStmt (linv, inv)) :: stmts ->
