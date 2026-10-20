@@ -1979,6 +1979,10 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
     val var_id_trs_map_ref : var_id_trs_map ref
     val ghost_stmts : Ast.stmt list
     val body_imp_loc : Ast.loc
+    val body_name : string
+    val body_def_hash : string
+    val body_mir_fingerprint : string
+    val body_mir_phase : string
     val body_tr_defs_ctx : body_tr_defs_ctx
     val is_generated_glue : bool
     val strict_lft_scope_ends : (Ast.loc * string) list
@@ -2016,6 +2020,8 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
       let callback_unwind_label = "#merge_callback_unwind_epilogue"
       let selected_resume_targets : string list ref = ref []
       let translating_selected_resume = ref false
+      let current_block = ref ""
+      let current_is_cleanup = ref false
       let generated_glue = Args.body_tr_defs_ctx.generated_glue
       let is_generated_glue = Args.is_generated_glue
       let hrtb_fnmut_output_bounds :
@@ -3372,6 +3378,25 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                 ref [] ),
             targets )
 
+    (* Diagnostic events are parser-inexpressible and execute through the
+       verifier on the selected path. They neither assume nor produce resources.
+       The exact same Body reader supplies the MIR binding and translated AST. *)
+    let r9_guard_trace loc details =
+      if Sys.getenv_opt "SMALLSORT_R9_GUARD_TRACE" = Some "1" &&
+         State.first_callback <> None && State.late_callback <> None then begin
+        if Args.body_def_hash = "" || Args.body_mir_fingerprint = "" ||
+           Args.body_mir_phase = "" || !State.current_block = "" then
+          Ast.static_error loc "R9 guard trace requires native body and MIR block identity" None;
+        let label = Printf.sprintf
+          "function=%s def_hash=%s mir_fingerprint=%s mir_phase=%s body_span=%s block=%s cleanup=%b at=%s %s"
+          Args.body_name Args.body_def_hash Args.body_mir_fingerprint
+          Args.body_mir_phase (Ast.string_of_loc Args.body_imp_loc)
+          !State.current_block !State.current_is_cleanup
+          (Ast.string_of_loc loc) details in
+        [Ast.PureStmt (loc, Ast.ExprStmt (Ast.CallExpr
+          (loc, "#r9_guard_event:" ^ label, [], [], [], Ast.Static)))]
+      end else []
+
     let translate_terminator_kind (ret_place_id : string)
         (tkind_cpn : TerminatorKindRd.t) (loc : Ast.loc) =
       let open TerminatorKindRd in
@@ -3394,7 +3419,8 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
             else
               Ast.CallExpr (loc, "returning", [], [], [ LitPat result ], Static)
           in
-          Ok ([ Ast.ReturnStmt (loc, Some result) ], EncodedTerminator, [])
+          Ok (r9_guard_trace loc "kind=return outcome=returning" @
+              [Ast.ReturnStmt (loc, Some result)], EncodedTerminator, [])
       | Unreachable ->
           Rocq_writer.rocq_print_ident TranslatorArgs.rocq_writer "Unreachable";
           Ok ([ Ast.Assert (loc, False loc) ], EncodedTerminator, [])
@@ -3463,9 +3489,21 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
               | Some key -> key | None -> selected_path in
             let selected_call = Ast.CallExpr (loc, call_name, [Ast.InferredTypeExpr loc], [],
               [Ast.LitPat receiver], Ast.Static) in
+            let unwind_binding = match UnwindActionRd.get (unwind_action_get drop_data_cpn) with
+              | UnwindActionRd.Continue -> "continue"
+              | UnwindActionRd.Unreachable -> "unreachable"
+              | UnwindActionRd.Terminate -> "terminate"
+              | UnwindActionRd.Cleanup id -> "cleanup:" ^ translate_basic_block_id id
+              | _ -> "unsupported" in
+            let binding outcome = Printf.sprintf
+              "kind=selected_drop outcome=%s key=%s selected=%s selected_hash=%s guard=%s normal_target=%s unwind=%s receiver=%s"
+              outcome generated_body_key selected_path selected_hash guard_path
+              target unwind_binding receiver_name in
             let call_stmt = Ast.SwitchStmt (loc, selected_call, [
-              Ast.SwitchStmtClause (loc, call "returning" [Ast.Var (loc, "__result")], finish);
-              Ast.SwitchStmtClause (loc, call "unwinding" [], finish @ unwind_stmts)]) in
+              Ast.SwitchStmtClause (loc, call "returning" [Ast.Var (loc, "__result")],
+                finish @ r9_guard_trace loc (binding "returning"));
+              Ast.SwitchStmtClause (loc, call "unwinding" [],
+                finish @ r9_guard_trace loc (binding "unwinding") @ unwind_stmts)]) in
             Ok ([ghost "close_points_to" [address];
                  Ast.DeclStmt (loc, [(loc, Some (Ast.PtrTypeExpr (loc,
                    Ast.StructTypeExpr (loc, Some guard_path, None, [], []))),
@@ -3546,7 +3584,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
              direct qualified Drop cleanup uses the existing synthetic location. *)
           let stmt_loc = if !State.translating_selected_resume then Ast.DummyLoc else loc in
           Ok
-            ( [
+            ( r9_guard_trace loc "kind=resume outcome=unwinding" @ [
                 Ast.ReturnStmt
                   ( stmt_loc,
                     Some (Ast.CallExpr (loc, "unwinding", [], [], [], Static))
@@ -4249,8 +4287,12 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
         let* terminator_stmts, terminator, successors =
           Rocq_writer.rocq_print_big_record_field TranslatorArgs.rocq_writer "terminator" @@ fun () ->
             State.translating_selected_resume := List.mem id !State.selected_resume_targets;
+            State.current_block := id;
+            State.current_is_cleanup := is_cleanup_get bblock_cpn;
             let result = translate_terminator ret_place_id terminator_cpn in
             State.translating_selected_resume := false;
+            State.current_block := "";
+            State.current_is_cleanup := false;
             result
         in
         let bblock : Mir.basic_block =
@@ -6481,6 +6523,10 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
       let var_id_trs_map_ref = var_id_trs_map_ref
       let ghost_stmts = ghost_stmts
       let body_imp_loc = imp_loc
+      let body_name = TrName.translate_def_path (def_path_get body_cpn)
+      let body_def_hash = def_path_hash_get body_cpn
+      let body_mir_fingerprint = captured_mir_hash_get body_cpn
+      let body_mir_phase = captured_mir_phase_get body_cpn
       let body_tr_defs_ctx = body_tr_defs_ctx
       let is_generated_glue = is_generated_glue
       let strict_lft_scope_ends = strict_lft_scope_ends

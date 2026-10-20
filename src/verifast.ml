@@ -182,6 +182,31 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
     if not (is_transparent_stmt s) then begin !stats#stmtExec l; reportStmtExec l end;
     let break_label () = if pure then "#ghostBreak" else "#break" in
     let continue_label () = if pure then "#ghostContinue" else "#continue" in
+    (* Read-only, bounded diagnostics for the opt-in R9 exact guard path.
+       Every continuation below receives the original h and env unchanged. *)
+    let r9_guard_state at h env label =
+      if dialect = Some Rust && options.option_rust_owned_array_allocation_r8 &&
+         Sys.getenv_opt "SMALLSORT_R9_GUARD_TRACE" = Some "1" then begin
+        let wanted name = List.exists (fun suffix -> String.ends_with ~suffix name)
+          ["ref_readonly_end_token"; "ref_initialized"; "points_to";
+           "points_to_"; "array"; "array_"; "CopyOnDrop_drop_effect"] in
+        let selected = List.filter_map (fun (Chunk ((g, _), ts, coef, args, _)) ->
+          match List.find_opt (fun (_, (_, _, _, _, symb, _, _)) -> g == symb) predfammap with
+          | Some (name, _) when wanted name -> Some (name, ts, coef, args)
+          | _ -> None) h in
+        let show = function Some value -> ctxt#pprint value | None -> "ABSENT" in
+        let tmp = try_assoc "tmp" env in
+        let live = try_assoc "$rust_storage_live$tmp" env in
+        Printf.eprintf
+          "R9_GUARD_EVENT at=%s %s tmp=%s storage_live=%s heap_total=%d selected_total=%d shown=%d\n%!"
+          (Ast.string_of_loc at) label (show tmp) (show live)
+          (List.length h) (List.length selected) (min 24 (List.length selected));
+        List.iteri (fun index (name, ts, coef, args) -> if index < 24 then
+          Printf.eprintf "R9_GUARD_CHUNK index=%d pred=%s types=%s coefficient=%s args=[%s]\n%!"
+            index name (String.concat "," (List.map string_of_type ts))
+            (ctxt#pprint coef) (String.concat ";" (List.map (fun t -> ctxt#pprint t) args))) selected
+      end
+    in
     let free_locals closeBraceLoc h tenv env locals cont =
       (* Any cleanup route retires the allocation receipt, including block and
          loop cleanup that is not preceded by an explicit MIR StorageDead. *)
@@ -205,6 +230,9 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
               consume_cxx_object closeBraceLoc coefpat addr t verify_dtor_call true h env @@ fun h env -> 
               free_locals_core h locals
       in
+      if List.mem_assoc "tmp" locals then
+        r9_guard_state closeBraceLoc h env
+          ("kind=pre_free tmp_required=" ^ (if List.assoc "tmp" locals then "1/2" else "1"));
       match locals with
         [] -> cont h env
       | _ -> with_context (Executing (h, env, closeBraceLoc, "Freeing locals.")) (fun _ -> free_locals_core h locals)
@@ -560,6 +588,11 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
         verify_stmt (pn,ilist) blocks_done lblenv tparams boxes false leminfo funcmap predinstmap sizemap tenv ghostenv h env s tcont return_cont econt
       else
         static_error l "Non-pure statements are not allowed here." None
+    | ExprStmt (CallExpr (l, name, [], [], [], Static))
+      when dialect = Some Rust && String.starts_with ~prefix:"#r9_guard_event:" name ->
+      require_pure ();
+      r9_guard_state l h env (String.sub name 16 (String.length name - 16));
+      cont h env
     | ExprStmt (CallExpr (l, ("assume"|"#assume" as g), [], [], [LitPat e], Static)) when dialect = Some Rust ->
       if not options.option_allow_assume && g = "assume" then static_error l "Specify -allow_assume on the command line to enable 'assume' statements." None;
       require_pure ();
