@@ -3169,8 +3169,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                                       (Ast.AssignExpr
                                         (loc, Ast.Var (loc, "__vf_late_callback_unwind"),
                                          Ast.Mutation, Ast.False loc));
-                                    fresh_first_callback_stmt plan.late_close_stmt;
-                                    Ast.GotoStmt (loc, "#merge_late_callback_scope_end")]
+                                    fresh_first_callback_stmt plan.late_close_stmt]
                                | None, Some s, None | None, None, Some s ->
                                    [fresh_first_callback_stmt s]
                                | None, None, None -> []
@@ -3186,9 +3185,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                                       (Ast.AssignExpr
                                         (loc, Ast.Var (loc, "__vf_late_callback_unwind"),
                                          Ast.Mutation, Ast.True loc));
-                                    fresh_first_callback_stmt plan.late_close_stmt;
-                                    Ast.GotoStmt
-                                      (loc, "#merge_late_callback_scope_end")]
+                                    fresh_first_callback_stmt plan.late_close_stmt]
                                | None, Some s, None ->
                                    [fresh_first_callback_stmt s;
                                     Ast.GotoStmt (loc, State.first_callback_unwind_label)]
@@ -3199,9 +3196,31 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                                    Ast.static_error loc "Overlapping callback recovery markers" None) );
                         ] )
             in
+            (match late_callback_cleanup, call_stmt with
+             | Some _, Ast.SwitchStmt (_, _, clauses) ->
+                 if List.exists (function
+                      | Ast.SwitchStmtClause (_, _, branch_stmts) ->
+                          List.exists (function
+                            | Ast.GotoStmt (_, "#merge_late_callback_scope_end") -> true
+                            | _ -> false) branch_stmts
+                      | _ -> false) clauses
+                 then
+                   Ast.static_error loc
+                     "Late callback outcome arms must fall through to their single CFG successor"
+                     None
+             | Some _, _ ->
+                 Ast.static_error loc
+                   "Late callback recovery requires an outcome switch"
+                   None
+             | None, _ -> ());
             (match first_callback_cleanup with
              | Some _ -> State.first_callback_normal_target := Some dst_bblock_id
              | None -> ());
+            (* For late recovery, both outcome arms finish with the checked
+               close block and fall through to this one CFG successor. Do not
+               put arm-local Gotos in the SwitchStmt: its branches are not
+               separate CFG predecessors, so block lowering may inline the
+               single successor without emitting a label for it. *)
             let call_target =
               match late_callback_cleanup with
               | Some _ -> "#merge_late_callback_scope_end"
