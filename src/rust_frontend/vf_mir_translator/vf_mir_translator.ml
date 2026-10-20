@@ -1984,6 +1984,10 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
           Ast.BlockStmt (block_loc, decls, stmts, close_loc, ref []))
     | _ -> invalid_arg "First callback command block has the wrong AST shape"
 
+  (* Shared by body-level admission and terminator translation. *)
+  let translate_basic_block_id (bblock_id_cpn : BasicBlockIdRd.t) =
+    Stdint.Uint32.to_string (BasicBlockIdRd.index_get bblock_id_cpn)
+
   module TranslatorArgs = Args
 
   module TrBody (Args : sig
@@ -2915,9 +2919,6 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
             | _ -> translate_regular_fn_call substs fn_name)
       | _ ->
           Error (`TrFnCallRExpr "Invalid function definition type translation")
-
-    let translate_basic_block_id (bblock_id_cpn : BasicBlockIdRd.t) =
-      Stdint.Uint32.to_string (BasicBlockIdRd.index_get bblock_id_cpn)
 
     let translate_unwind_action (unwind_action_cpn : UnwindActionRd.t)
         (loc : Ast.loc) =
