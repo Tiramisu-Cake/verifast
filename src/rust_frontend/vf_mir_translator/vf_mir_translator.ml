@@ -5794,16 +5794,36 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
           _, _, _) -> true
       | _ -> false
     in
+    let r9_array_u64_close = function
+      | Ast.Close (_, None, "array",
+          [Ast.ManifestTypeExpr (_, Ast.Int (Ast.Unsigned, Ast.FixedWidthRank 3))],
+          [], [_; Ast.LitPat _; Ast.LitPat _], None) -> true
+      | _ -> false
+    in
     let r9_named_call name stmt =
       match r9_unpure stmt with
       | Ast.ExprStmt (Ast.CallExpr (_, found, _, _, _, Ast.Static)) -> found = name
       | _ -> false
     in
+    let r9_array_u64_join = function
+      | Ast.ExprStmt (Ast.CallExpr (_, "array_join",
+          [Ast.ManifestTypeExpr (_, Ast.Int (Ast.Unsigned, Ast.FixedWidthRank 3))],
+          [], [Ast.LitPat _], Ast.Static)) -> true
+      | _ -> false
+    in
+    let r9_current_owners_call = function
+      | Ast.ExprStmt (Ast.CallExpr (_, "r9_current_u64_owners", [], [],
+          [Ast.LitPat _; Ast.LitPat _], Ast.Static)) -> true
+      | _ -> false
+    in
     let r9_safe_command = function
       | Ast.Assert _ -> true
       | stmt when r9_array_u64_open stmt -> true
+      | stmt when r9_array_u64_close (r9_unpure stmt) -> true
       | Ast.MergeFractionsStmt _ -> true
       | stmt when r9_named_call "end_ref_readonly" stmt -> true
+      | stmt when r9_array_u64_join (r9_unpure stmt) -> true
+      | stmt when r9_current_owners_call (r9_unpure stmt) -> true
       | _ -> false
     in
     let r9_return_markers = List.filter_map (function
