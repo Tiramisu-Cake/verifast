@@ -3165,10 +3165,10 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                               (match late_callback_cleanup,
                                      first_callback_cleanup, callback_cleanup with
                                | Some (plan, _), None, None ->
-                                   [Ast.PureStmt (loc, Ast.ExprStmt
+                                   [Ast.ExprStmt
                                       (Ast.AssignExpr
-                                        (loc, Ast.Var (loc, "r7_late_unwind"),
-                                         Ast.Mutation, Ast.False loc)));
+                                        (loc, Ast.Var (loc, "__vf_late_callback_unwind"),
+                                         Ast.Mutation, Ast.False loc));
                                     fresh_first_callback_stmt plan.late_close_stmt;
                                     Ast.GotoStmt (loc, "#merge_late_callback_scope_end")]
                                | None, Some s, None | None, None, Some s ->
@@ -3182,10 +3182,10 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                               (match late_callback_cleanup,
                                      first_callback_cleanup, callback_cleanup with
                                | Some (plan, _), None, None ->
-                                   [Ast.PureStmt (loc, Ast.ExprStmt
+                                   [Ast.ExprStmt
                                       (Ast.AssignExpr
-                                        (loc, Ast.Var (loc, "r7_late_unwind"),
-                                         Ast.Mutation, Ast.True loc)));
+                                        (loc, Ast.Var (loc, "__vf_late_callback_unwind"),
+                                         Ast.Mutation, Ast.True loc));
                                     fresh_first_callback_stmt plan.late_close_stmt;
                                     Ast.GotoStmt
                                       (loc, "#merge_late_callback_scope_end")]
@@ -7156,6 +7156,24 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
             let vf_local_decls =
               List.map (translate_to_vf_local_decl loc) (ret_place_decl :: local_decls)
             in
+            let vf_local_decls =
+              match late_callback with
+              | None -> vf_local_decls
+              | Some _ ->
+                  let unwind_flag = "__vf_late_callback_unwind" in
+                  if List.exists
+                       (fun ({ id; _ } : Mir.local_decl) -> id = unwind_flag)
+                       all_local_decls
+                  then
+                    Ast.static_error fn_sig_loc
+                      "Late callback internal unwind flag collides with a source local"
+                      None;
+                  Ast.DeclStmt
+                    (loc,
+                     [ (loc, Some (Ast.ManifestTypeExpr (loc, Ast.Bool)),
+                       unwind_flag, Some (Ast.False loc), (ref false, ref None) ])
+                    :: vf_local_decls
+            in
             let bblocks_cpn = basic_blocks_get_list body_cpn in
             State.selected_resume_targets := List.filter_map (fun block ->
               match TerminatorKindRd.get (TerminatorRd.kind_get (BasicBlockRd.terminator_get block)) with
@@ -7337,7 +7355,8 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                       statements = [plan.late_recover_stmt];
                       terminator_stmts =
                         [Ast.IfStmt
-                          (call_loc, Ast.Var (call_loc, "r7_late_unwind"),
+                          (call_loc,
+                           Ast.Var (call_loc, "__vf_late_callback_unwind"),
                            [Ast.GotoStmt (call_loc, cleanup_target)],
                            [Ast.GotoStmt (call_loc, normal_target)])];
                       terminator = Mir.EncodedTerminator;
