@@ -2226,8 +2226,10 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
         assert_term dec_check2 h' env''' (expr_loc dec) "Cannot prove that the loop measure remains non-negative." None;
         cont h'''
       end $. fun h''' ->
-      check_leaks h''' env endBodyLoc "Loop leaks heap chunks";
-      r9_guard_state l h''' env "kind=loop_invariant gate=backedge_checked"
+      let SymExecSuccess =
+        check_leaks h''' env endBodyLoc "Loop leaks heap chunks" in
+      r9_guard_state l h''' env "kind=loop_invariant gate=backedge_checked";
+      SymExecSuccess
     | WhileStmt (l, e, Some (LoopSpec (pre, post)), dec, ss, final_ss) ->
       if not pure then begin
         match ss with PureStmt (lp, _)::_ -> static_error lp "Pure statement not allowed here." None | _ -> ()
