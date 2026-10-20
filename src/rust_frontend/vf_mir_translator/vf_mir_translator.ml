@@ -7171,7 +7171,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                   Ast.DeclStmt
                     (loc,
                      [ (loc, Some (Ast.ManifestTypeExpr (loc, Ast.Bool)),
-                       unwind_flag, Some (Ast.False loc), (ref false, ref None) ])
+                       unwind_flag, Some (Ast.False loc), (ref false, ref None)) ])
                     :: vf_local_decls
             in
             let bblocks_cpn = basic_blocks_get_list body_cpn in
