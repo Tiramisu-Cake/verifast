@@ -7573,7 +7573,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                   | _ -> ()) assertion;
                 require (not !mentions) "invariant refers to the instrumentation local";
                 Ok (Some (call_id, target_id, raw_id, local, live_at, dead_at,
-                          invariant_stmt, inv_at, fail))
+                          invariant_stmt, inv_at))
             in
             State.selected_resume_targets := List.filter_map (fun block ->
               match TerminatorKindRd.get (TerminatorRd.kind_get (BasicBlockRd.terminator_get block)) with
@@ -7604,7 +7604,9 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
             let bblocks = match r11_cut_plan with
               | None -> bblocks
               | Some (call_id, target_id, raw_id, local, live_at, dead_at,
-                      invariant_stmt, inv_at, fail) ->
+                      invariant_stmt, inv_at) ->
+                  let fail reason = Ast.static_error inv_at
+                    ("R11 invariant placement binding refused: " ^ reason) None in
                   let require condition reason = if not condition then fail reason in
                   let unique id = match List.filter (fun (bb : Mir.basic_block) -> bb.id = id) bblocks with
                     | [one] -> one | _ -> fail "translated block binding is ambiguous" in
