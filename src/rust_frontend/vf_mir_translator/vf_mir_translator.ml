@@ -7474,6 +7474,107 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                     :: vf_local_decls
             in
             let bblocks_cpn = basic_blocks_get_list body_cpn in
+            (* R11: place the logical cut after the complete lifetime of the
+               compiler-inserted ghost-command result. Keep every native
+               Live/Dead and CFG edge, and never manufacture a live binding. *)
+            let* r11_cut_plan =
+              if Sys.getenv_opt "SMALLSORT_R11_LABEL_STORAGE_PLACEMENT" <> Some "1" ||
+                 not (name = "insert_tail" || String.ends_with ~suffix:"::insert_tail" name)
+              then Ok None
+              else
+                let invariants = List.filter_map (function
+                  | (Ast.PureStmt (source_at, Ast.InvariantStmt (inv_at, assertion)) as stmt) ->
+                      Some (source_at, inv_at, assertion, stmt)
+                  | _ -> None) !State.ghost_stmts in
+                let fail_at = match invariants with
+                  | (_, at, _, _) :: _ -> at | [] -> fn_sig_loc in
+                let fail reason = Ast.static_error fail_at
+                  ("R11 invariant placement binding refused: " ^ reason) None in
+                let require condition reason = if not condition then fail reason in
+                let source_at, inv_at, assertion, invariant_stmt = match invariants with
+                  | [one] -> one | _ -> fail "missing or ambiguous source invariant" in
+                require (State.first_callback <> None && State.late_callback <> None &&
+                         State.r9_guard_return <> None && not State.is_generated_glue)
+                  "required source-bound callback/guard body is absent";
+                let start at = fst (Ast.lexed_loc at) in
+                let finish at = snd (Ast.lexed_loc at) in
+                let is_ghost data =
+                  match D.decode_operand (FnCallDataRd.func_get data) with
+                  | Constant {const = Val {ty = {kind = FnDef
+                      {id = {name = "VeriFast_ghost_command"}; substs = []}}}} ->
+                      FnCallDataRd.args_get_list data = []
+                  | _ -> false in
+                let* candidates = ListAux.try_map (fun block ->
+                  match TerminatorKindRd.get
+                      (TerminatorRd.kind_get (BasicBlockRd.terminator_get block)) with
+                  | TerminatorKindRd.Call data when is_ghost data ->
+                      let* {Mir.span = term_at; _} = translate_source_info
+                        (TerminatorRd.source_info_get (BasicBlockRd.terminator_get block)) in
+                      let* call_at = translate_span_data (FnCallDataRd.call_span_get data) in
+                      Ok (if start call_at = start source_at || start term_at = start source_at
+                          then Some (block, data, term_at, call_at) else None)
+                  | _ -> Ok None) bblocks_cpn in
+                let call_block, data, term_at, call_at =
+                  match List.filter_map (fun x -> x) candidates with
+                  | [one] -> one | _ -> fail "missing or ambiguous native annotation call" in
+                require (term_at = call_at && start call_at = start source_at &&
+                         start call_at <= start inv_at && start inv_at < finish call_at)
+                  "source/call/terminator span mismatch";
+                let destination = FnCallDataRd.destination_get data in
+                require (PlaceRd.projection_get_list destination = []) "projected result local";
+                let raw_id = LocalDeclIdRd.name_get (PlaceRd.local_get destination) in
+                let local = translate_local_decl_id (PlaceRd.local_get destination) in
+                let declarations = List.mapi (fun index decl -> index, decl) local_decls_cpn
+                  |> List.filter (fun (_, decl) ->
+                       LocalDeclIdRd.name_get (LocalDeclRd.id_get decl) = raw_id) in
+                let index, declaration = match declarations with
+                  | [one] -> one | _ -> fail "missing or ambiguous local declaration" in
+                require (raw_id = "_" ^ string_of_int index && index > arg_count &&
+                         local = TrName.tag_internal raw_id &&
+                         not (List.exists (fun ({id; _} : var_id_trs_entry) ->
+                           id = TrName.tag_internal raw_id) trs_map))
+                  "ordinary, named or noncanonical result local";
+                require (decode_ty (D.decode_ty (LocalDeclRd.ty_get declaration)) = `Tuple [])
+                  "annotation result is not the exact unit type";
+                let target_id = match OptionRd.get (FnCallDataRd.target_get data) with
+                  | OptionRd.Something pointer -> translate_basic_block_id (VfMirRd.of_pointer pointer)
+                  | _ -> fail "annotation call has no normal successor" in
+                let call_id = translate_basic_block_id (BasicBlockRd.id_get call_block) in
+                let target_block = match List.filter (fun block ->
+                    translate_basic_block_id (BasicBlockRd.id_get block) = target_id) bblocks_cpn with
+                  | [one] when target_id <> call_id -> one
+                  | _ -> fail "missing or ambiguous immediate successor" in
+                require (not (BasicBlockRd.is_cleanup_get call_block) &&
+                         not (BasicBlockRd.is_cleanup_get target_block))
+                  "cleanup annotation placement is unsupported";
+                let marker action statement = match StatementKindRd.get (StatementRd.kind_get statement) with
+                  | StatementKindRd.StorageLive id when action = "Live" ->
+                      LocalDeclIdRd.name_get id = raw_id
+                  | StatementKindRd.StorageDead id when action = "Dead" ->
+                      LocalDeclIdRd.name_get id = raw_id
+                  | _ -> false in
+                let all_statements = List.concat_map BasicBlockRd.statements_get_list bblocks_cpn in
+                require (List.length (List.filter (marker "Live") all_statements) = 1 &&
+                         List.length (List.filter (marker "Dead") all_statements) = 1)
+                  "missing or ambiguous Live/Dead pair";
+                let live = match List.rev (BasicBlockRd.statements_get_list call_block) with
+                  | statement :: _ when marker "Live" statement -> statement
+                  | _ -> fail "Live is not immediately before the annotation call" in
+                let dead = match BasicBlockRd.statements_get_list target_block with
+                  | statement :: _ when marker "Dead" statement -> statement
+                  | _ -> fail "Dead is not first in the immediate successor" in
+                let* {Mir.span = live_at; _} = translate_source_info (StatementRd.source_info_get live) in
+                let* {Mir.span = dead_at; _} = translate_source_info (StatementRd.source_info_get dead) in
+                require (live_at = call_at && start dead_at = finish call_at)
+                  "Live/call/Dead source span mismatch";
+                let mentions = ref false in
+                Ast.expr_iter (function
+                  | Ast.Var (_, name) | Ast.WVar (_, name, _) when name = local -> mentions := true
+                  | _ -> ()) assertion;
+                require (not !mentions) "invariant refers to the instrumentation local";
+                Ok (Some (call_id, target_id, raw_id, local, live_at, dead_at,
+                          invariant_stmt, inv_at, fail))
+            in
             State.selected_resume_targets := List.filter_map (fun block ->
               match TerminatorKindRd.get (TerminatorRd.kind_get (BasicBlockRd.terminator_get block)) with
               | TerminatorKindRd.Drop data when List.mem
@@ -7499,6 +7600,75 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                     (fun bblock_cpn ->
                       translate_basic_block ret_place_id bblock_cpn)
                     bblocks_cpn
+            in
+            let bblocks = match r11_cut_plan with
+              | None -> bblocks
+              | Some (call_id, target_id, raw_id, local, live_at, dead_at,
+                      invariant_stmt, inv_at, fail) ->
+                  let require condition reason = if not condition then fail reason in
+                  let unique id = match List.filter (fun (bb : Mir.basic_block) -> bb.id = id) bblocks with
+                    | [one] -> one | _ -> fail "translated block binding is ambiguous" in
+                  let call = unique call_id and target = unique target_id in
+                  require (call.terminator_stmts = [invariant_stmt] && call.successors = [target_id] &&
+                    (match call.terminator with Mir.GotoTerminator (_, id) -> id = target_id | _ -> false))
+                    "translated annotation call/edge differs";
+                  require (List.map (fun (bb : Mir.basic_block) -> bb.id)
+                    (List.filter (fun (bb : Mir.basic_block) -> List.mem target_id bb.successors) bblocks) = [call_id])
+                    "immediate successor has another incoming edge";
+                  require (match List.rev call.statements with
+                    | Ast.RustStorageLiveStmt (_, at, id, name) :: _ -> at = live_at && id = raw_id && name = local
+                    | _ -> false) "translated Live differs";
+                  let dead, rest = match target.statements with
+                    | (Ast.RustStorageDeadStmt (_, at, id, name) as dead) :: rest
+                      when at = dead_at && id = raw_id && name = local -> dead, rest
+                    | _ -> fail "translated Dead differs" in
+                  (* Refuse any observable use/address-taking, including in
+                     ghost assertions. All storage events still execute. *)
+                  let used = ref false in
+                  let expr e = Ast.expr_iter (function
+                    | Ast.Var (_, name) | Ast.WVar (_, name, _) when name = local -> used := true
+                    | _ -> ()) e in
+                  let rec pat = function
+                    | Ast.LitPat e -> expr e
+                    | Ast.CtorPat (_, _, pats) -> List.iter pat pats
+                    | Ast.WCtorPat (_, _, _, _, _, _, pats, value) ->
+                        List.iter pat pats; Option.iter expr value
+                    | _ -> () in
+                  let inspect = function
+                    | Ast.ExprStmt e | Ast.Assert (_, e) | Ast.Leak (_, e)
+                    | Ast.InvariantStmt (_, e) | Ast.MergeFractionsStmt (_, e) -> expr e
+                    | Ast.SpecStmt (_, pre, post) -> expr pre; expr post
+                    | Ast.DeclStmt (_, entries) -> List.iter (fun (_, _, name, init, _) ->
+                        require (name <> local) "local is redeclared"; Option.iter expr init) entries
+                    | Ast.IfStmt (_, e, _, _) -> expr e
+                    | Ast.SwitchStmt (_, e, clauses) ->
+                        expr e; List.iter (function
+                          | Ast.SwitchStmtClause (_, pattern, _) -> expr pattern
+                          | Ast.SwitchStmtDefaultClause _ -> ()) clauses
+                    | Ast.ReturnStmt (_, value) -> Option.iter expr value
+                    | Ast.Open (_, obj, _, _, indices, args, coef)
+                    | Ast.Close (_, obj, _, _, indices, args, coef) ->
+                        Option.iter expr obj; List.iter pat (indices @ args); Option.iter pat coef
+                    | Ast.SplitFractionStmt (_, _, _, pats, coef) -> List.iter pat pats; Option.iter expr coef
+                    | Ast.BlockStmt (_, decls, _, _, _) -> List.iter (function
+                        | Ast.TypeWithTypeidDecl (_, _, value) -> expr value
+                        | _ -> fail "unsupported nested declaration in placement body") decls
+                    | Ast.RustStorageLiveStmt _ | Ast.RustStorageDeadStmt _
+                    | Ast.PureStmt _ | Ast.NonpureStmt _ | Ast.NoopStmt _
+                    | Ast.GotoStmt _ | Ast.LabelStmt _ | Ast.Break _ | Ast.Continue _ -> ()
+                    | _ -> fail "unsupported statement in instrumentation-use check" in
+                  List.iter (fun (bb : Mir.basic_block) ->
+                    List.iter (Ast.stmt_iter inspect) (bb.statements @ bb.terminator_stmts)) bblocks;
+                  require (not !used) "instrumentation result is used or address-taken";
+                  Printf.eprintf
+                    "R11_INVARIANT_CUT kind=checked_annotation_placement function=%s def_hash=%s mir_fingerprint=%s mir_phase=%s from=%s to=%s mir_local=%s local=%s inv_at=%s live_at=%s dead_at=%s retained_storage=true retained_edges=true\n%!"
+                    name (def_path_hash_get body_cpn) (captured_mir_hash_get body_cpn)
+                    (captured_mir_phase_get body_cpn) call_id target_id raw_id local
+                    (Ast.string_of_loc inv_at) (Ast.string_of_loc live_at) (Ast.string_of_loc dead_at);
+                  List.map (fun (bb : Mir.basic_block) ->
+                    if bb.id = call_id then {bb with terminator_stmts = []}
+                    else if bb.id = target_id then {bb with statements = dead :: invariant_stmt :: rest}
+                    else bb) bblocks
             in
             let bblocks =
               match State.first_callback, !State.first_callback_call_loc,
