@@ -177,6 +177,30 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
           assume_not_null lval_ref_params
         | _ -> cont ()
 
+  (* R11 diagnostics only: no heap/env changes or logical operations. *)
+  let r11_label_state leminfo at h env label show_live =
+    if dialect = Some Rust && options.option_rust_owned_array_allocation_r8 &&
+       Sys.getenv_opt "SMALLSORT_R11_LABEL_STORAGE_TRACE" = Some "1" then begin
+      let function_name = match leminfo with
+        RealFuncInfo (_, name, _) -> name | _ -> "OTHER" in
+      let prefix = "$rust_storage_live$" in
+      let live = List.filter (fun (name, _) ->
+        String.length name >= String.length prefix &&
+        String.sub name 0 (String.length prefix) = prefix) env in
+      Printf.eprintf
+        "R11_EXEC function=%s at=%s %s heap_total=%d env_total=%d live_total=%d live_shown=%d\n%!"
+        function_name (Ast.string_of_loc at) label (List.length h)
+        (List.length env) (List.length live)
+        (if show_live then min 32 (List.length live) else 0);
+      if show_live then List.iteri (fun index (name, receipt) -> if index < 32 then
+        let local = String.sub name (String.length prefix)
+          (String.length name - String.length prefix) in
+        let binding = match try_assoc local env with
+          Some value -> ctxt#pprint value | None -> "ABSENT" in
+        Printf.eprintf "R11_EXEC_LIVE index=%d local=%s binding=%s receipt=%s\n%!"
+          index local binding (ctxt#pprint receipt)) live
+    end
+
   let rec verify_stmt (pn,ilist) blocks_done lblenv tparams boxes pure leminfo funcmap predinstmap sizemap tenv ghostenv h env s tcont return_cont econt =
     let l = stmt_loc s in
     if not (is_transparent_stmt s) then begin !stats#stmtExec l; reportStmtExec l end;
@@ -1029,7 +1053,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
           cont h
       end $. fun h ->
       cont (Chunk ((module_symb, true), [], real_unit, [current_module_term; ctxt#mk_false], None)::h) env
-    | (RustStorageLiveStmt (l, _, _, x) | RustStorageDeadStmt (l, _, _, x)) as storage_stmt ->
+    | (RustStorageLiveStmt (l, mir_at, mir_id, x) | RustStorageDeadStmt (l, mir_at, mir_id, x)) as storage_stmt ->
       let is_dead = match storage_stmt with RustStorageDeadStmt _ -> true | _ -> false in
       if dialect <> Some Rust || pure then
         static_error l "MIR storage markers require a real Rust execution context." None;
@@ -1038,6 +1062,17 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
          entry in env alone may denote a reference; this receipt is created only
          by the checked MIR StorageLive allocation below and retired at Dead. *)
       let live_key x = "$rust_storage_live$" ^ x in
+      let trace phase h env =
+        if Sys.getenv_opt "SMALLSORT_R11_LABEL_STORAGE_TRACE" = Some "1" then begin
+        let show = function Some value -> ctxt#pprint value | None -> "ABSENT" in
+        r11_label_state leminfo l h env
+          (Printf.sprintf "kind=storage action=%s phase=%s mir_local=%s local=%s mir_at=%s binding=%s receipt=%s"
+            (if is_dead then "Dead" else "Live") phase mir_id x
+            (Ast.string_of_loc mir_at) (show (try_assoc x env))
+            (show (try_assoc (live_key x) env))) false
+        end
+      in
+      trace "before" h env;
       begin match try_assoc x tenv with
         Some (RefType t) | Some (StaticArrayType _ as t) ->
         let is_const = match try_assoc x consts with Some b -> b | None ->
@@ -1046,7 +1081,9 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
           if not (List.mem_assoc x env) then
             static_error l "StorageDead requires a currently live local." None;
           free_locals l h tenv env [x, is_const] $. fun h env ->
-          cont h (List.remove_assoc (live_key x) (List.remove_assoc x env))
+          let env = List.remove_assoc (live_key x) (List.remove_assoc x env) in
+          trace "after" h env;
+          cont h env
         end else begin
           if List.mem_assoc x env then
             static_error l "StorageLive requires a currently dead local." None;
@@ -1133,7 +1170,9 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
           exclude_r8_arrays h $. fun () ->
           let verify_ctor_call = verify_ctor_call (pn, ilist) leminfo funcmap predinstmap sizemap tenv ghostenv h env addr (Some x) in
           produce_cxx_object l (if is_const then real_half else real_unit) addr t eval_h verify_ctor_call Uninitialized true true h env $. fun h env ->
-          cont h ((live_key x, addr) :: (x, addr) :: env)
+          let env = (live_key x, addr) :: (x, addr) :: env in
+          trace "after" h env;
+          cont h env
         end
       | Some _ -> cont h (if is_dead then List.remove_assoc x env else env)
       | None -> static_error l "MIR storage marker names an unknown local." None
@@ -3112,9 +3151,14 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
         assert_false h env (l()) "Loop invariant required." None
       | (_, Some (l, inv, tenv)) ->
         reportStmtExec l;
+        let phase = if List.memq block blocks_done then "backedge" else "initial_entry" in
+        r11_label_state leminfo l h env ("kind=label_invariant phase=" ^ phase ^ " gate=consume_before") true;
         consume_asn rules [] h env ghostenv env inv true real_unit (fun _ h _ _ _ ->
+          r11_label_state leminfo l h env ("kind=label_invariant phase=" ^ phase ^ " gate=consumed_before_leakcheck") true;
           check_backedge_termination (List.assoc current_thread_name env) leminfo l tenv h env $. fun h ->
-          check_leaks h env l "Loop leaks heap chunks"
+          let SymExecSuccess = check_leaks h env l "Loop leaks heap chunks" in
+          r11_label_state leminfo l h env ("kind=label_invariant phase=" ^ phase ^ " gate=checked") true;
+          SymExecSuccess
         )
       | (false, None) ->
         let blocks_done = block::blocks_done in
@@ -3289,7 +3333,9 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
                 end
                 env
             in
+            r11_label_state leminfo l [] env "kind=label_invariant phase=body gate=produce_before heap_scope=empty_production_input" true;
             produce_asn env [] [] ghostenv env inv real_unit None None (fun h ghostenv env ->
+              r11_label_state leminfo l h env "kind=label_invariant phase=body gate=produced" true;
               let blocks_done = block::blocks_done in
               verify_miniblock (pn,ilist) blocks_done lblenv tparams boxes pure leminfo funcmap predinstmap sizemap tenv ghostenv h env ss (cont blocks_done) return_cont econt
             )

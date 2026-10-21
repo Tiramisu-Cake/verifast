@@ -4093,8 +4093,28 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                    Static )))
       | Undefined _ -> Error (`TrRvalue "Unknown Rvalue kind")
 
+    (* Decoded Body provenance for storage on an invariant annotation line.
+       This is a translation plan, explicitly separate from R11_EXEC. *)
+    let r11_storage_plan block_id is_cleanup action mir_id local loc mir_loc =
+      if Sys.getenv_opt "SMALLSORT_R11_LABEL_STORAGE_TRACE" = Some "1" &&
+         State.r9_guard_return <> None && State.late_callback <> None then begin
+        let same_line at =
+          let (file, line, _), _ = Ast.lexed_loc at in
+          let (mir_file, mir_line, _), _ = Ast.lexed_loc mir_loc in
+          file = mir_file && line = mir_line in
+        if List.exists (function
+            | Ast.PureStmt (_, Ast.InvariantStmt (at, _)) -> same_line at
+            | _ -> false) !State.ghost_stmts then
+          Printf.eprintf
+            "R11_STORAGE_PLAN kind=decoded_body function=%s def_hash=%s mir_fingerprint=%s mir_phase=%s body_span=%s block=%s cleanup=%b action=%s mir_local=%s local=%s ast_at=%s mir_at=%s\n%!"
+            Args.body_name Args.body_def_hash Args.body_mir_fingerprint
+            Args.body_mir_phase (Ast.string_of_loc Args.body_imp_loc)
+            block_id is_cleanup action mir_id local
+            (Ast.string_of_loc loc) (Ast.string_of_loc mir_loc)
+      end
+
     let translate_statement_kind (statement_kind_cpn : StatementKindRd.t)
-        (loc : Ast.loc) (mir_loc : Ast.loc) =
+        (loc : Ast.loc) (mir_loc : Ast.loc) block_id is_cleanup =
       let open StatementKindRd in
       match get statement_kind_cpn with
       | Assign assign_data_cpn -> (
@@ -4249,6 +4269,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
       | StorageLive local ->
           let mir_local_id = LocalDeclIdRd.name_get local in
           let local = translate_local_decl_id local in
+          r11_storage_plan block_id is_cleanup "Live" mir_local_id local loc mir_loc;
           Rocq_writer.rocq_print_application TranslatorArgs.rocq_writer "StorageLive" @@ fun () ->
           Rocq_writer.rocq_print_argument TranslatorArgs.rocq_writer @@ fun () ->
           Rocq_writer.rocq_print_string_literal TranslatorArgs.rocq_writer local;
@@ -4256,6 +4277,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
       | StorageDead local ->
           let mir_local_id = LocalDeclIdRd.name_get local in
           let local = translate_local_decl_id local in
+          r11_storage_plan block_id is_cleanup "Dead" mir_local_id local loc mir_loc;
           Rocq_writer.rocq_print_application TranslatorArgs.rocq_writer "StorageDead" @@ fun () ->
           Rocq_writer.rocq_print_argument TranslatorArgs.rocq_writer @@ fun () ->
           Rocq_writer.rocq_print_string_literal TranslatorArgs.rocq_writer local;
@@ -4286,7 +4308,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
           Ok []
       | Undefined _ -> Error (`TrStatementKind "Unknown StatementKind")
 
-    let translate_statement (statement_cpn : StatementRd.t) =
+    let translate_statement block_id is_cleanup (statement_cpn : StatementRd.t) =
       let open StatementRd in
       let src_info_cpn = source_info_get statement_cpn in
       let* { Mir.span = loc; Mir.scope } = translate_source_info src_info_cpn in
@@ -4301,7 +4323,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
         else loc
       in
       let kind_cpn = kind_get statement_cpn in
-      translate_statement_kind kind_cpn loc mir_loc
+      translate_statement_kind kind_cpn loc mir_loc block_id is_cleanup
 
     let translate_basic_block (ret_place_id : string)
         (bblock_cpn : BasicBlockRd.t) =
@@ -4325,7 +4347,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
             Rocq_writer.rocq_print_big_list TranslatorArgs.rocq_writer @@ fun () ->
               statements_cpn |> ListAux.try_map @@ fun statement_cpn ->
                 Rocq_writer.rocq_print_big_list_element TranslatorArgs.rocq_writer @@ fun () ->
-                  translate_statement statement_cpn
+                  translate_statement id (is_cleanup_get bblock_cpn) statement_cpn
         in
         let statements = List.concat statements in
         let terminator_cpn = terminator_get bblock_cpn in
