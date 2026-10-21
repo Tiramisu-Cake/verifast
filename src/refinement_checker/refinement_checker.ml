@@ -1730,6 +1730,7 @@ type basic_block_info = <
   id: basic_block_path;
   predecessors: int list; (* indices of predecessor basic blocks *)
   genv: generic_env;
+  locals: local_decl array;
   statements: statement list;
   commands: command list;
   terminator: terminator;
@@ -1738,7 +1739,7 @@ type basic_block_info = <
   caller: (string (* callee result variable *) * place (* destination place *) * basic_block_info (* destination basic block *)) option;
 >
 
-let rec basic_block_info_of genv bbs predecessors bb_idx: basic_block_info =
+let rec basic_block_info_of genv locals bbs predecessors bb_idx: basic_block_info =
   let bb = bbs.(bb_idx) in
   let id = {bb_caller=None; bb_index=bb_idx} in
   let cmds = List.concat_map commands_of_statement bb.statements in
@@ -1746,11 +1747,12 @@ let rec basic_block_info_of genv bbs predecessors bb_idx: basic_block_info =
     method id = id
     method predecessors = predecessors
     method genv = genv
+    method locals = locals
     method statements = bb.statements
     method commands = cmds
     method terminator = bb.terminator
     method to_string = string_of_basic_block_path id
-    method sibling i = basic_block_info_of genv bbs (bb_idx::predecessors) i
+    method sibling i = basic_block_info_of genv locals bbs (bb_idx::predecessors) i
     method caller = None
   end
 
@@ -1841,6 +1843,7 @@ let rec process_commands bodies (env: env) opnds (i_bb: basic_block_info) i_s (s
       method id = callee_bb_id
       method predecessors = predecessors
       method genv = genv
+      method locals = locals
       method statements = bbs.(i).statements
       method commands = cmds
       method terminator = bbs.(i).terminator
@@ -2850,7 +2853,36 @@ let check_body_refines_body bodies0 bodies1 def_path body0 body1 =
               let v = fresh_symbol () in
               cont env0 (v::opnds0) env1 (v::opnds1)
             end
-        | RawPtr raw_ptr_data_cpn0, RawPtr raw_ptr_data_cpn1 -> error "RawPtr: not yet supported"
+        | RawPtr raw0, RawPtr raw1 ->
+            (* Same-operation matching only.  This does not produce a borrow or
+               memory permission; the ordinary address-taken reconciliation
+               below must first establish equal initialized local states. *)
+            if raw0.mutability <> raw1.mutability then
+              error "RawPtr: mutabilities do not match";
+            if raw0.place.projection <> [] || raw1.place.projection <> [] then
+              error "RawPtr: projected places are not supported";
+            if raw0.place.local_is_mutable <> raw1.place.local_is_mutable ||
+               raw0.place.kind <> raw1.place.kind then
+              error "RawPtr: place kinds do not match";
+            let local_ty (bb: basic_block_info) (place: Vf_mir_decoder.place) =
+              match Array.to_list bb#locals |> List.find_opt (fun (d: local_decl) -> d.id = place.local) with
+                Some d -> d.ty
+              | None -> error "RawPtr: local declaration is missing"
+            in
+            let ty0 = local_ty i_bb0 raw0.place in
+            let ty1 = local_ty i_bb1 raw1.place in
+            (* Keep the full MIR type too: decode_ty intentionally erases some
+               distinctions (e.g. raw pointer mutability).  Conservative refusal
+               is preferable to silently widening the same-type contract. *)
+            if ty0 <> ty1 || decode_ty i_bb0#genv ty0 <> decode_ty i_bb1#genv ty1 then
+              error "RawPtr: local types do not match";
+            begin match check_place_refines_place env0 caller0 raw0.place env1 caller1 raw1.place with
+              (Local x0, Local x1) -> local_address_taken x0 x1
+            | Nonlocal, Nonlocal ->
+              let v = fresh_symbol () in
+              cont env0 (v::opnds0) env1 (v::opnds1)
+            | _ -> error "RawPtr: projected places are not supported"
+            end
         | Cast ty0, Cast ty1 ->
             let v, opnds0, opnds1 = consume_operand opnds0 opnds1 in
             if decode_ty i_bb0#genv ty0 <> decode_ty i_bb1#genv ty1 then
@@ -2935,7 +2967,7 @@ let check_body_refines_body bodies0 bodies1 def_path body0 body1 =
       iter env0 env1
     in
     try
-      check_basic_block_refines_basic_block env0 (basic_block_info_of root_genv0 (Array.of_list body0.basic_blocks) [] 0) env1 (basic_block_info_of root_genv1 (Array.of_list body1.basic_blocks) [] 0)
+      check_basic_block_refines_basic_block env0 (basic_block_info_of root_genv0 locals0 (Array.of_list body0.basic_blocks) [] 0) env1 (basic_block_info_of root_genv1 locals1 (Array.of_list body1.basic_blocks) [] 0)
     with LocalAddressTaken (x0, x1) ->
       let address_taken = (x0, x1) :: address_taken in
       if !verbosity >= verbosity_basic_block then Printf.printf "Caught LocalAddressTaken; restarting with address_taken = %s\n" (String.concat ", " (List.map (fun (x0, x1) -> Printf.sprintf "%s = %s" (string_of_lv_path x0) (string_of_lv_path x1)) address_taken));
