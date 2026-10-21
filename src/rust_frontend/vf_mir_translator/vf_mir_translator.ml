@@ -7611,7 +7611,8 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                   let unique id = match List.filter (fun (bb : Mir.basic_block) -> bb.id = id) bblocks with
                     | [one] -> one | _ -> fail "translated block binding is ambiguous" in
                   let call = unique call_id and target = unique target_id in
-                  require (call.terminator_stmts = [invariant_stmt] && call.successors = [target_id] &&
+                  require ((match call.terminator_stmts with [stmt] -> stmt == invariant_stmt | _ -> false) &&
+                    call.successors = [target_id] &&
                     (match call.terminator with Mir.GotoTerminator (_, id) -> id = target_id | _ -> false))
                     "translated annotation call/edge differs";
                   require (List.map (fun (bb : Mir.basic_block) -> bb.id)
