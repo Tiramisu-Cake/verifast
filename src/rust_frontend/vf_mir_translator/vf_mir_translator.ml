@@ -2007,6 +2007,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
     val first_callback : first_callback_plan option
     val late_callback : late_callback_plan option
     val r9_guard_return : r9_guard_return_plan option
+    val r19_unwind_cleanup : (Ast.loc * Ast.stmt) option
   end) =
   struct
     type hrtb_callback_referent = HrtbParam of string | HrtbU64
@@ -2024,6 +2025,8 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
       let late_callback = Args.late_callback
       let r9_guard_return = Args.r9_guard_return
       let r9_guard_return_used : (string * string * bool * string) list ref = ref []
+      let r19_unwind_cleanup = Args.r19_unwind_cleanup
+      let r19_unwind_cleanup_used = ref false
       let first_callback_used = ref false
       let first_callback_call_loc = ref None
       let first_callback_normal_target = ref None
@@ -3124,6 +3127,36 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
        | Some _, Some _, _ | Some _, _, Some _ ->
            Ast.static_error loc "Overlapping callback recovery markers" None
        | _ -> ());
+      (* R19: the marked block after insert_tail also runs on unwind. *)
+      let r19_unwind_cleanup =
+        match State.r19_unwind_cleanup, fn_call_rexpr with
+        | Some (marker_loc, stmt),
+          (FnCallOutcome (Ast.CallExpr (_, name, _, _, _, _)) |
+           FnCallResult (Ast.CallExpr (_, name, _, _, _, _)))
+          when name = "insert_tail" || String.ends_with ~suffix:"::insert_tail" name ->
+            let (call_file, call_end_line, _) = snd (Ast.lexed_loc loc) in
+            let ((marker_file, marker_line, _), _) = Ast.lexed_loc marker_loc in
+            if marker_line <> call_end_line + 1 || marker_file <> call_file then None
+            else (
+              if !State.r19_unwind_cleanup_used ||
+                 TranslatorArgs.ignore_unwind_paths ||
+                 late_callback_cleanup <> None || first_callback_cleanup <> None ||
+                 callback_cleanup <> None ||
+                 (match fn_call_rexpr with FnCallOutcome _ -> false | _ -> true) ||
+                 (match OptionRd.get (target_get fn_call_data_cpn) with
+                  | Something _ -> false | _ -> true) ||
+                 (match UnwindActionRd.get (unwind_action_get fn_call_data_cpn) with
+                  | UnwindActionRd.Continue -> false | _ -> true) ||
+                 (match unwind_stmts with
+                  | [Ast.ReturnStmt (_, Some (Ast.CallExpr (_, "unwinding", [], [], [], Ast.Static)))] -> false
+                  | _ -> true) then
+                Ast.static_error loc
+                  "R19 cleanup needs a Continue insert_tail call"
+                  None;
+              State.r19_unwind_cleanup_used := true;
+              Some stmt)
+        | _ -> None
+      in
       let* dst, dst_is_mutable =
         Rocq_writer.rocq_print_big_record_field TranslatorArgs.rocq_writer "destination" @@ fun () ->
         translate_place (destination_get fn_call_data_cpn) loc
@@ -3212,7 +3245,10 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                                     Ast.GotoStmt (loc, State.first_callback_unwind_label)]
                                | None, None, Some s ->
                                    [s; Ast.GotoStmt (loc, State.callback_unwind_label)]
-                               | None, None, None -> unwind_stmts
+                               | None, None, None ->
+                                   (match r19_unwind_cleanup with
+                                    | Some s -> fresh_first_callback_stmt s :: unwind_stmts
+                                    | None -> unwind_stmts)
                                | Some _, _, _ | _, Some _, Some _ ->
                                    Ast.static_error loc "Overlapping callback recovery markers" None) );
                         ] )
@@ -6592,6 +6628,62 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
          Ast.static_error fn_sig_loc
            "R9 guard-return marker requires the admitted first and late callback plans" None
      | _ -> ());
+    let r19_marker = function
+      | Ast.PureStmt (_, Ast.ExprStmt (Ast.CallExpr (_, "r19_insert_tail_unwind_cleanup", [], [], [], Ast.Static)))
+      | Ast.ExprStmt (Ast.CallExpr (_, "r19_insert_tail_unwind_cleanup", [], [], [], Ast.Static)) -> true
+      | _ -> false
+    in
+    let r19_unwind_cleanup =
+      let unpure = function Ast.PureStmt (_, stmt) -> stmt | stmt -> stmt in
+      let var name = function
+        | Ast.LitPat (Ast.Var (_, found)) -> found = name
+        | _ -> false in
+      let marked, stray = List.partition (function
+        | Ast.PureStmt (_, Ast.BlockStmt (_, [], head :: _, _, _)) -> r19_marker head
+        | _ -> false)
+        (List.filter (fun stmt ->
+           r19_marker stmt ||
+           (match stmt with
+            | Ast.PureStmt (_, Ast.BlockStmt (_, _, head :: _, _, _)) -> r19_marker head
+            | _ -> false)) ghost_stmts) in
+      match marked, stray with
+      | [], [] -> None
+      | [Ast.PureStmt (l, Ast.BlockStmt (block_l, [], _ :: commands, close, _))], [] ->
+          let body_name = TrName.translate_def_path (def_path_get body_cpn) in
+          if not (body_name = "b2_three_from_local" ||
+                  String.ends_with ~suffix:"::b2_three_from_local" body_name) ||
+             first_callback <> None || late_callback <> None ||
+             callback_close <> None || r9_guard_return <> None then
+            Ast.static_error l
+              "R19 cleanup marker outside b2_three_from_local"
+              None;
+          (match List.map unpure commands with
+           | [Ast.Assert (_, Ast.CallExpr (_, "array",
+                [Ast.ManifestTypeExpr (_, Ast.Int (Ast.Unsigned, Ast.FixedWidthRank 3))],
+                [], [p; _; Ast.VarPat (_, current)], _));
+              Ast.ExprStmt (Ast.CallExpr (_, "r9_drop_u64_owners", [], [],
+                [t; current_arg], Ast.Static));
+              Ast.ExprStmt (Ast.CallExpr (_, "array_to_array_", [], [],
+                [p_arg], Ast.Static))]
+             when var "begin" p && var "t" t && var current current_arg &&
+                  var "begin" p_arg -> ()
+           | _ ->
+               Ast.static_error l
+                 "R19 cleanup block shape mismatch"
+                 None);
+          Some (l, Ast.PureStmt (l,
+            Ast.BlockStmt (block_l, [], commands, close, ref [])))
+      | _ ->
+          let loc = match marked @ stray with stmt :: _ -> Ast.stmt_loc stmt | [] -> fn_sig_loc in
+          Ast.static_error loc "Ambiguous R19 cleanup marker" None
+    in
+    let ghost_stmts =
+      match r19_unwind_cleanup with
+      | None -> ghost_stmts
+      | Some (l, stmt) ->
+          List.map (fun g ->
+            if Ast.stmt_loc g = l then fresh_first_callback_stmt stmt else g) ghost_stmts
+    in
     let late_strict_scope_ends =
       match late_callback with
       | Some plan -> [(plan.late_scope_end_loc, plan.late_lft)]
@@ -6768,6 +6860,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
       let first_callback = first_callback
       let late_callback = late_callback
       let r9_guard_return = r9_guard_return
+      let r19_unwind_cleanup = r19_unwind_cleanup
     end) in
     let vdis_cpn = var_debug_info_get_list body_cpn in
     (* Since var id translation map is empty var debug info contains the plain Mir ids *)
@@ -7962,6 +8055,12 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                        "Post-retirement generated Drop control found multiple qualified Drops" None)
               | _ -> vf_bblocks
             in
+            (match State.r19_unwind_cleanup with
+             | Some (l, _) when not !State.r19_unwind_cleanup_used ->
+                 Ast.static_error l
+                   "R19 cleanup marker did not follow insert_tail"
+                   None
+             | _ -> ());
             (match State.r9_guard_return with
              | None -> ()
              | Some plan ->
