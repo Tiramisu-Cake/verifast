@@ -2959,17 +2959,16 @@ let check_body_refines_body bodies0 bodies1 def_path body0 body1 =
         with LocalAddressTaken (x0, x1) ->
           if List.assoc x0 env0 <> List.assoc x1 env1 then begin
             let diagnostic = Printf.sprintf "The states of the two locals %s and %s whose address is taken are not equal" (string_of_lv_path x0) (string_of_lv_path x1) in
-            let command_listing raw_ptr_label block current_position =
+            let command_listing program block =
               let lines = List.mapi (fun i command ->
-                let label = match command with RawPtr _ -> " [" ^ raw_ptr_label ^ "]" | _ -> "" in
-                Printf.sprintf "%3d:%s %s" i label (string_of_command command)) block#commands in
-              Printf.sprintf "======== %s commands of basic block %s (current command %d) ========\n%s"
-                raw_ptr_label block#to_string current_position (String.concat "\n" lines)
+                Printf.sprintf "%3d: %s" i (string_of_command command)) block#commands in
+              Printf.sprintf "======== Commands of basic block %s of %s program ========\n%s"
+                block#to_string program (String.concat "\n" lines)
             in
-            Printf.printf "Unequal address-taken state in function %s\nOriginal command position: basic block %s, command %d\nVerified command position: basic block %s, command %d\n%s\n%s\n%s\n"
-              def_path i_bb0#to_string i_s0 i_bb1#to_string i_s1
-              (command_listing "RawPtr_1" i_bb0 i_s0)
-              (command_listing "RawPtr_2" i_bb1 i_s1)
+            Printf.printf "In function %s, unequal address-taken state at original command %d of basic block %s and verified command %d of basic block %s\n%s\n%s\n%s\n"
+              def_path i_s0 i_bb0#to_string i_s1 i_bb1#to_string
+              (command_listing "original" i_bb0)
+              (command_listing "verified" i_bb1)
               diagnostic;
             flush stdout;
             failwith diagnostic
