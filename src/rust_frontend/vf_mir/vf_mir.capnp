@@ -195,6 +195,19 @@ struct TyConst {
 
 struct Region {
     id @0: Text;
+    identity @1: Option(Identity);
+
+    struct Identity {
+        union {
+            inferenceVariable @0: InferenceVariable;
+            erased @1: Void;
+        }
+    }
+
+    struct InferenceVariable {
+        scopeId @0: Text; # Empty means the body scope was unavailable; not usable as identity.
+        variableId @1: UInt32;
+    }
 }
 
 struct GenericArgKind {
@@ -612,6 +625,29 @@ struct CastKind {
 
 }
 
+struct PointerCoercionData {
+    kind @0: Kind;
+    coercionSource @1: CoercionSource;
+
+    struct Kind {
+        union {
+            reifyFnPointer @0: Unsafety;
+            unsafeFnPointer @1: Void;
+            closureFnPointer @2: Unsafety;
+            mutToConstPointer @3: Void;
+            arrayToPointer @4: Void;
+            unsize @5: Void;
+        }
+    }
+
+    struct CoercionSource {
+        union {
+            asCast @0: Void;
+            implicit @1: Void;
+        }
+    }
+}
+
 struct RuntimeChecks {
     union {
         ubChecks @0: Void;
@@ -690,6 +726,8 @@ struct Rvalue {
         kind @2: CastKind;
         operand @0: Operand;
         ty @1: Ty;
+        sourceTy @3: Ty;
+        pointerCoercionData @4: Option(PointerCoercionData);
     }
 
     struct AggregateData {
@@ -916,6 +954,7 @@ struct Body {
     generatedGlue @27: GeneratedGlue;
     capturedMirHash @28: Text;
     capturedMirPhase @29: Text;
+    regionScopeId @30: Text; # Scope for Region.inferenceVariable IDs in this body only.
     visibility @22: Visibility;
 }
 

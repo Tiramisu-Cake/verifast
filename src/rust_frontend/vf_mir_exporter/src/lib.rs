@@ -635,6 +635,7 @@ use rustc_span::RemapPathScopeComponents;
         annots: LinkedList<Box<GhostRange>>,
         mut_annots: Vec<rustc_span::BytePos>,
         generated_raw_callee: Option<rustc_hir::def_id::DefId>,
+        region_scope_id: Option<String>,
     }
 
     impl<'tcx, 'a> EncCtx<'tcx, 'a> {
@@ -651,6 +652,7 @@ use rustc_span::RemapPathScopeComponents;
                 annots,
                 mut_annots,
                 generated_raw_callee: None,
+                region_scope_id: None,
             }
         }
         pub fn add_req_adt(&mut self, adt: ty::AdtDef<'tcx>) {
@@ -1018,6 +1020,12 @@ use rustc_span::RemapPathScopeComponents;
             output.reborrow().init_unsafety().set_unsafe(());
             output.set_captured_mir_hash(&Self::captured_mir_hash(body));
             output.set_captured_mir_phase(&format!("{:?}", body.phase));
+            ctx.region_scope_id = Some(format!(
+                "{:?}:{}",
+                tcx.def_path_hash(g.instance.def_id()),
+                Self::captured_mir_hash(body),
+            ));
+            output.set_region_scope_id(ctx.region_scope_id.as_deref().unwrap());
             for field in [0, 1, 2] {
                 let span = match field {
                     0 => output.reborrow().init_fn_sig_span(),
@@ -1609,8 +1617,8 @@ use rustc_span::RemapPathScopeComponents;
             match clause.0.kind().skip_binder() {
                 ty::ClauseKind::RegionOutlives(outlives_clause) => {
                     let mut outlives_cpn = clause_cpn.init_outlives();
-                    Self::encode_region(enc_ctx.tcx, outlives_clause.0, outlives_cpn.reborrow().init_region1());
-                    Self::encode_region(enc_ctx.tcx, outlives_clause.1, outlives_cpn.reborrow().init_region2());
+                    Self::encode_region(enc_ctx.tcx, enc_ctx, outlives_clause.0, outlives_cpn.reborrow().init_region1());
+                    Self::encode_region(enc_ctx.tcx, enc_ctx, outlives_clause.1, outlives_cpn.reborrow().init_region2());
                 }
                 ty::ClauseKind::Trait(trait_clause) => {
                     let bound_vars = clause.0.kind().bound_vars();
@@ -1739,7 +1747,14 @@ use rustc_span::RemapPathScopeComponents;
 
             let def_path = tcx.def_path_str(def_id);
             body_cpn.set_def_path(&def_path);
-            body_cpn.set_def_path_hash(&format!("{:?}", tcx.def_path_hash(def_id)));
+            let def_path_hash = format!("{:?}", tcx.def_path_hash(def_id));
+            body_cpn.set_def_path_hash(&def_path_hash);
+            enc_ctx.region_scope_id = Some(format!(
+                "{}:{}",
+                def_path_hash,
+                Self::captured_mir_hash(body),
+            ));
+            body_cpn.set_region_scope_id(enc_ctx.region_scope_id.as_deref().unwrap());
 
             let parent_module = tcx.parent_module_from_def_id(def_id.expect_local());
             if parent_module != rustc_span::def_id::CRATE_MOD_ID {
@@ -1960,6 +1975,31 @@ use rustc_span::RemapPathScopeComponents;
             match us {
                 hir::Safety::Safe => us_cpn.set_safe(()),
                 hir::Safety::Unsafe => us_cpn.set_unsafe(()),
+            }
+        }
+
+        fn encode_pointer_coercion(
+            coercion: ty::adjustment::PointerCoercion,
+            source: mir::CoercionSource,
+            mut output: pointer_coercion_data_cpn::Builder<'_>,
+        ) {
+            let mut kind = output.reborrow().init_kind();
+            match coercion {
+                ty::adjustment::PointerCoercion::ReifyFnPointer(safety) => {
+                    Self::encode_unsafety(safety, kind.init_reify_fn_pointer());
+                }
+                ty::adjustment::PointerCoercion::UnsafeFnPointer => kind.set_unsafe_fn_pointer(()),
+                ty::adjustment::PointerCoercion::ClosureFnPointer(safety) => {
+                    Self::encode_unsafety(safety, kind.init_closure_fn_pointer());
+                }
+                ty::adjustment::PointerCoercion::MutToConstPointer => kind.set_mut_to_const_pointer(()),
+                ty::adjustment::PointerCoercion::ArrayToPointer => kind.set_array_to_pointer(()),
+                ty::adjustment::PointerCoercion::Unsize => kind.set_unsize(()),
+            }
+            let mut coercion_source = output.init_coercion_source();
+            match source {
+                mir::CoercionSource::AsCast => coercion_source.set_as_cast(()),
+                mir::CoercionSource::Implicit => coercion_source.set_implicit(()),
             }
         }
 
@@ -2424,7 +2464,7 @@ use rustc_span::RemapPathScopeComponents;
             mut ref_ty_cpn: ref_ty_cpn::Builder<'_>,
         ) {
             let region_cpn = ref_ty_cpn.reborrow().init_region();
-            Self::encode_region(tcx, region, region_cpn);
+            Self::encode_region(tcx, enc_ctx, region, region_cpn);
             let ty_cpn = ref_ty_cpn.reborrow().init_ty();
             Self::encode_ty(tcx, enc_ctx, ty, ty_cpn);
             let mutability_cpn = ref_ty_cpn.init_mutability();
@@ -2455,7 +2495,12 @@ use rustc_span::RemapPathScopeComponents;
             Self::encode_ty_args(enc_ctx, substs, substs_cpn);
         }
 
-        fn encode_region(tcx: TyCtxt<'tcx>, region: ty::Region<'tcx>, mut region_cpn: region_cpn::Builder<'_>) {
+        fn encode_region(
+            tcx: TyCtxt<'tcx>,
+            enc_ctx: &EncCtx<'tcx, 'a>,
+            region: ty::Region<'tcx>,
+            mut region_cpn: region_cpn::Builder<'_>,
+        ) {
             debug!("Encoding region {:?}", region);
             match region.kind() {
                 ty::RegionKind::ReEarlyParam(early_bound_region) => {
@@ -2486,9 +2531,19 @@ use rustc_span::RemapPathScopeComponents;
                 },
                 ty::RegionKind::ReLateParam(_debruijn_index) => bug!(),
                 ty::RegionKind::ReStatic => region_cpn.set_id("'static"),
-                ty::RegionKind::ReVar(_) | ty::RegionKind::ReErased => {
-                    // Todo @Nima: We should find a mapping of `RegionVid`s and lifetime variable names at `hir`
+                ty::RegionKind::ReVar(variable_id) => {
+                    let identity_option = region_cpn.reborrow().init_identity();
+                    let mut identity = identity_option.init_something();
+                    let mut inference_variable = identity.init_inference_variable();
+                    inference_variable.set_scope_id(enc_ctx.region_scope_id.as_deref().unwrap_or(""));
+                    inference_variable.set_variable_id(variable_id.as_u32());
+                    // Keep the legacy projection for compatibility. The new typed
+                    // identity is authoritative only within its nonempty body scope.
                     region_cpn.set_id(/*&format!("{:?}", region)*/ "'<erased>");
+                }
+                ty::RegionKind::ReErased => {
+                    region_cpn.init_identity().init_something().set_erased(());
+                    region_cpn.set_id("'<erased>");
                 }
                 ty::RegionKind::RePlaceholder(_placeholder_region) => bug!(),
                 _ => bug!(),
@@ -2507,7 +2562,7 @@ use rustc_span::RemapPathScopeComponents;
             match kind {
                 ty::GenericArgKind::Lifetime(region) => {
                     let region_cpn = kind_cpn.init_lifetime();
-                    Self::encode_region(tcx, region, region_cpn);
+                    Self::encode_region(tcx, enc_ctx, region, region_cpn);
                 }
                 ty::GenericArgKind::Type(ty) => {
                     let ty_cpn = kind_cpn.init_type();
@@ -2691,7 +2746,7 @@ use rustc_span::RemapPathScopeComponents;
                     let place_ty_cpn = ref_data_cpn.reborrow().init_place_ty();
                     Self::encode_ty(tcx, enc_ctx, place_ty.ty, place_ty_cpn);
                     let region_cpn = ref_data_cpn.reborrow().init_region();
-                    Self::encode_region(enc_ctx.tcx, *region, region_cpn);
+                    Self::encode_region(enc_ctx.tcx, enc_ctx, *region, region_cpn);
                     let bor_kind_cpn = ref_data_cpn.reborrow().init_bor_kind();
                     Self::encode_borrow_kind(bor_kind, bor_kind_cpn);
                     let place_cpn = ref_data_cpn.reborrow().init_place();
@@ -2721,7 +2776,12 @@ use rustc_span::RemapPathScopeComponents;
                     match cast_kind {
                         mir::CastKind::PointerExposeProvenance => cast_kind_cpn.set_pointer_expose_provenance(()),
                         mir::CastKind::PointerWithExposedProvenance => cast_kind_cpn.set_pointer_with_exposed_provenance(()),
-                        mir::CastKind::PointerCoercion { .. } => cast_kind_cpn.set_pointer_coercion(()),
+                        mir::CastKind::PointerCoercion(coercion, source) => {
+                            cast_kind_cpn.set_pointer_coercion(());
+                            let pointer_coercion_option = cast_data_cpn.reborrow().init_pointer_coercion_data();
+                            let pointer_coercion_cpn = pointer_coercion_option.init_something();
+                            Self::encode_pointer_coercion(*coercion, *source, pointer_coercion_cpn);
+                        }
                         mir::CastKind::IntToInt => cast_kind_cpn.set_int_to_int(()),
                         mir::CastKind::FloatToInt => cast_kind_cpn.set_float_to_int(()),
                         mir::CastKind::FloatToFloat => cast_kind_cpn.set_float_to_float(()),
@@ -2735,6 +2795,9 @@ use rustc_span::RemapPathScopeComponents;
                     }
                     let operand_cpn = cast_data_cpn.reborrow().init_operand();
                     Self::encode_operand(tcx, enc_ctx, operand, operand_cpn);
+                    let source_ty = operand.ty(&enc_ctx.body().local_decls, tcx);
+                    let source_ty_cpn = cast_data_cpn.reborrow().init_source_ty();
+                    Self::encode_ty(tcx, enc_ctx, source_ty, source_ty_cpn);
                     let ty_cpn = cast_data_cpn.init_ty();
                     Self::encode_ty(tcx, enc_ctx, *ty, ty_cpn);
                 }
