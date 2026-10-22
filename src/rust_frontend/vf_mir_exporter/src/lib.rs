@@ -2533,7 +2533,7 @@ use rustc_span::RemapPathScopeComponents;
                 ty::RegionKind::ReStatic => region_cpn.set_id("'static"),
                 ty::RegionKind::ReVar(variable_id) => {
                     let identity_option = region_cpn.reborrow().init_identity();
-                    let mut identity = identity_option.init_something();
+                    let identity = identity_option.init_something();
                     let mut inference_variable = identity.init_inference_variable();
                     inference_variable.set_scope_id(enc_ctx.region_scope_id.as_deref().unwrap_or(""));
                     inference_variable.set_variable_id(variable_id.as_u32());
