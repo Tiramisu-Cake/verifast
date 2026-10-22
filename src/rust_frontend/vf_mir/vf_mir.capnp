@@ -726,7 +726,7 @@ struct Rvalue {
         kind @2: CastKind;
         operand @0: Operand;
         ty @1: Ty;
-        sourceTy @3: Ty;
+        sourceTy @3: Option(Ty);
         pointerCoercionData @4: Option(PointerCoercionData);
     }
 

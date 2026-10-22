@@ -467,7 +467,7 @@ let fns_to_be_inlined: (string * body) list =
         {id={name="result"}; ty={kind=Param "T"}; mutability=Not; source_info={span}};
         {id={name="self"}; ty={kind=Adt {id={name="std::boxed::Box"}; kind=StructKind; substs=[{kind=Type {kind=Param "T"}}; {kind=Type {kind=Param "A"}}]}}; mutability=Not; source_info={span}};
         {id={name="contents_ptr"}; ty={kind=RawPtr {mutability=Not; ty={kind=Param "T"}}}; mutability=Not; source_info={span}};
-        {id={name="ref_self"}; ty={kind=Ref {region={id="'<erased>"}; mutability=Mut; ty={kind=Adt {id={name="std::boxed::Box"}; kind=StructKind; substs=[{kind=Type {kind=Param "T"}}; {kind=Type {kind=Param "A"}}]}}}}; mutability=Not; source_info={span}};
+        {id={name="ref_self"}; ty={kind=Ref {region={id="'<erased>"; identity=Nothing}; mutability=Mut; ty={kind=Adt {id={name="std::boxed::Box"}; kind=StructKind; substs=[{kind=Type {kind=Param "T"}}; {kind=Type {kind=Param "A"}}]}}}}; mutability=Not; source_info={span}};
         {id={name="drop_result"}; ty={kind=Tuple []}; mutability=Not; source_info={span}};
         {id={name="contents_ptr2"}; ty={kind=RawPtr {mutability=Not; ty={kind=Param "T"}}}; mutability=Not; source_info={span}};
       ]
@@ -490,7 +490,9 @@ let fns_to_be_inlined: (string * body) list =
                     local_is_mutable=false;
                     kind=Other
                   };
-                  ty={kind=RawPtr {mutability=Not; ty={kind=Param "T"}}}
+                  ty={kind=RawPtr {mutability=Not; ty={kind=Param "T"}}};
+                source_ty=Nothing;
+                pointer_coercion_data=Nothing
                 }
               };
               source_info={span}
@@ -520,7 +522,9 @@ let fns_to_be_inlined: (string * body) list =
                     local_is_mutable=false;
                     kind=Other
                   };
-                  ty={kind=RawPtr {mutability=Not; ty={kind=Param "T"}}}
+                  ty={kind=RawPtr {mutability=Not; ty={kind=Param "T"}}};
+                source_ty=Nothing;
+                pointer_coercion_data=Nothing
                 }
               };
               source_info={span}
@@ -529,7 +533,7 @@ let fns_to_be_inlined: (string * body) list =
               kind=Assign {
                 lhs_place=local "ref_self";
                 rhs_rvalue=Ref {
-                  region={id="'<erased>"};
+                  region={id="'<erased>"; identity=Nothing};
                   bor_kind=Mut;
                   place=local "self";
                   place_ty={kind=Adt {id={name="std::boxed::Box"}; kind=StructKind; substs=[{kind=Type {kind=Param "T"}}; {kind=Type {kind=Param "A"}}]}};
@@ -666,6 +670,7 @@ let fns_to_be_inlined: (string * body) list =
       generated_glue=empty_generated_glue;
       captured_mir_hash="";
       captured_mir_phase="";
+      region_scope_id="";
       visibility=Public;
     }
   );
@@ -680,7 +685,7 @@ let fns_to_be_inlined: (string * body) list =
   let local_decls: local_decl list =
     [
       {id={name="result"}; ty={kind=RawPtr {mutability=Not; ty={kind=Param "T"}}}; mutability=Not; source_info={span}};
-      {id={name="self"}; ty={kind=Ref {region={id="'<erased>"}; mutability=Not; ty={kind=Adt {id={name="std::boxed::Box"}; kind=StructKind; substs=[{kind=Type {kind=Param "T"}}]}}}}; mutability=Not; source_info={span}};
+      {id={name="self"}; ty={kind=Ref {region={id="'<erased>"; identity=Nothing}; mutability=Not; ty={kind=Adt {id={name="std::boxed::Box"}; kind=StructKind; substs=[{kind=Type {kind=Param "T"}}]}}}}; mutability=Not; source_info={span}};
       {id={name="b"}; ty={kind=Adt {id={name="std::boxed::Box"}; kind=StructKind; substs=[{kind=Type {kind=Param "T"}}]}}; mutability=Not; source_info={span}};
     ]
   in
@@ -714,7 +719,9 @@ let fns_to_be_inlined: (string * body) list =
                   local_is_mutable=false;
                   kind=Other
                 };
-                ty={kind=RawPtr {mutability=Not; ty={kind=Param "T"}}}
+                ty={kind=RawPtr {mutability=Not; ty={kind=Param "T"}}};
+                source_ty=Nothing;
+                pointer_coercion_data=Nothing
               }
             };
             source_info={span}
@@ -733,7 +740,7 @@ let fns_to_be_inlined: (string * body) list =
     contract={annotations=[]; span};
     output={kind=RawPtr {mutability=Not; ty={kind=Param "T"}}};
     inputs=[
-      {kind=Ref {region={id="'<erased>"}; mutability=Not; ty={kind=Adt {id={name="std::boxed::Box"}; kind=StructKind; substs=[{kind=Type {kind=Param "T"}}]}}}};
+      {kind=Ref {region={id="'<erased>"; identity=Nothing}; mutability=Not; ty={kind=Adt {id={name="std::boxed::Box"}; kind=StructKind; substs=[{kind=Type {kind=Param "T"}}]}}}};
     ];
     local_decls;
     basic_blocks;
@@ -767,6 +774,7 @@ let fns_to_be_inlined: (string * body) list =
       generated_glue=empty_generated_glue;
       captured_mir_hash="";
       captured_mir_phase="";
+      region_scope_id="";
     visibility=Public;
   }
   );
@@ -1010,6 +1018,7 @@ let fns_to_be_inlined: (string * body) list =
       generated_glue=empty_generated_glue;
       captured_mir_hash="";
       captured_mir_phase="";
+      region_scope_id="";
     visibility=Public;
   });
   ("std::result::Result::<T, E>::map_err",
@@ -1252,6 +1261,7 @@ let fns_to_be_inlined: (string * body) list =
       generated_glue=empty_generated_glue;
       captured_mir_hash="";
       captured_mir_phase="";
+      region_scope_id="";
     visibility=Public;
   });
   ("std::option::Option::<T>::map",
@@ -1472,6 +1482,7 @@ let fns_to_be_inlined: (string * body) list =
       generated_glue=empty_generated_glue;
       captured_mir_hash="";
       captured_mir_phase="";
+      region_scope_id="";
     visibility=Public;
   });
   "std::option::Option::<T>::unwrap_or_else",
@@ -1656,6 +1667,7 @@ let fns_to_be_inlined: (string * body) list =
       generated_glue=empty_generated_glue;
       captured_mir_hash="";
       captured_mir_phase="";
+      region_scope_id="";
     visibility=Public;
   }
 ]
