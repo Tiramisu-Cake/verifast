@@ -372,7 +372,26 @@ let string_of_local_var_state = function
 
 let eval_mir_const genv mir_const_cpn =
   match mir_const_cpn with
-    Ty mir_ty_const_cpn -> failwith "Using typesystem constant expressions as MIR constant operands is not yet supported"
+    Ty mir_ty_const_cpn ->
+    let ty = decode_ty genv mir_ty_const_cpn.ty in
+    begin match mir_ty_const_cpn.const.kind with
+      Value value_cpn ->
+      let value_ty = decode_ty genv value_cpn.ty in
+      if ty <> value_ty then
+        failwith "Typesystem MIR constant has inconsistent outer and value types";
+      begin match ty, value_cpn.val_tree with
+        UInt PtrWidth, Leaf scalar_int_cpn ->
+        let size = scalar_int_cpn.size in
+        if size < 1 || size > 8 then
+          failwith "Typesystem MIR usize constant has unsupported scalar size";
+        let data = decode_uint128 scalar_int_cpn.data in
+        if Stdint.Uint128.shift_right data (size * 8) <> Stdint.Uint128.zero then
+          failwith "Typesystem MIR usize constant does not fit its scalar size";
+        ScalarInt (decode_scalar_int ty scalar_int_cpn)
+      | _ -> failwith "Only closed usize typesystem MIR constants are supported"
+      end
+    | _ -> failwith "Only closed usize typesystem MIR constants are supported"
+    end
   | Val mir_val_const_cpn ->
     let ty = decode_ty genv mir_val_const_cpn.ty in
     let mir_const_value_cpn = mir_val_const_cpn.const_value in
