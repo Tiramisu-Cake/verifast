@@ -2957,7 +2957,23 @@ let check_body_refines_body bodies0 bodies1 def_path body0 body1 =
         try
           check_codepos_refines_codepos_core env0 opnds0 i_bb0 i_s0 ss_i0 env1 opnds1 i_bb1 i_s1 ss_i1
         with LocalAddressTaken (x0, x1) ->
-          if List.assoc x0 env0 <> List.assoc x1 env1 then failwith (Printf.sprintf "The states of the two locals %s and %s whose address is taken are not equal" (string_of_lv_path x0) (string_of_lv_path x1));
+          if List.assoc x0 env0 <> List.assoc x1 env1 then begin
+            let diagnostic = Printf.sprintf "The states of the two locals %s and %s whose address is taken are not equal" (string_of_lv_path x0) (string_of_lv_path x1) in
+            let command_listing raw_ptr_label block current_position =
+              let lines = List.mapi (fun i command ->
+                let label = match command with RawPtr _ -> " [" ^ raw_ptr_label ^ "]" | _ -> "" in
+                Printf.sprintf "%3d:%s %s" i label (string_of_command command)) block#commands in
+              Printf.sprintf "======== %s commands of basic block %s (current command %d) ========\n%s"
+                raw_ptr_label block#to_string current_position (String.concat "\n" lines)
+            in
+            Printf.printf "Unequal address-taken state in function %s\nOriginal command position: basic block %s, command %d\nVerified command position: basic block %s, command %d\n%s\n%s\n%s\n"
+              def_path i_bb0#to_string i_s0 i_bb1#to_string i_s1
+              (command_listing "RawPtr_1" i_bb0 i_s0)
+              (command_listing "RawPtr_2" i_bb1 i_s1)
+              diagnostic;
+            flush stdout;
+            failwith diagnostic
+          end;
           if !verbosity >= verbosity_basic_block then Printf.printf "Caught LocalAddressTaken (%s, %s); restarting codepos check\n" (string_of_lv_path x0) (string_of_lv_path x1);
           let a = fresh_symbol () in
           let env0 = update_env x0 (Address a) env0 in
