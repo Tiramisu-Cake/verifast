@@ -3314,6 +3314,131 @@ use rustc_span::RemapPathScopeComponents;
                     Self::encode_annotation(tcx, &ghost_generic_arg_lists[0], annot_cpn);
                 }
             }
+
+            Self::attach_r23_slice_projection(tcx, enc_ctx, func, fn_call_data_cpn);
+        }
+
+        // This is an opt-in observation of the actual immutable standard-library
+        // callee body. It does not summarize the body or change caller MIR.
+        fn attach_r23_slice_projection(
+            tcx: TyCtxt<'tcx>,
+            enc_ctx: &mut EncCtx<'tcx, 'a>,
+            func: &mir::Operand<'tcx>,
+            mut call_cpn: fn_call_data_cpn::Builder<'_>,
+        ) {
+            if std::env::var("SMALLSORT_R23_SOURCE_ARRAY_BORROW").as_deref() != Ok("1") {
+                return;
+            }
+            let ty = func.ty(&enc_ctx.body().local_decls, tcx);
+            let ty::TyKind::FnDef(def_id, args) = ty.kind() else { return; };
+            let callee_name = tcx.def_path_str(*def_id);
+            if callee_name != "core::slice::<impl [T]>::as_mut_ptr" {
+                return;
+            }
+            let mut projection = call_cpn
+                .init_r23_slice_projection()
+                .init_something();
+            projection.set_callee_name(&callee_name);
+            projection.set_callee_def_path_hash(&format!("{:?}", tcx.def_path_hash(*def_id)));
+            if !tcx.is_mir_available(*def_id) {
+                projection.set_unavailable_reason("compiler reports no MIR body for the exact callee");
+                return;
+            }
+
+            let body = tcx.optimized_mir(*def_id);
+            projection.set_mir_phase(&format!("{:?}", body.phase));
+            projection.set_mir_debug_hash(&Self::captured_mir_hash(body));
+
+            let old_mode = std::mem::replace(&mut enc_ctx.mode, EncKind::Body(body));
+            let old_region_scope_id = enc_ctx.region_scope_id.replace(format!(
+                "{}:{}",
+                tcx.def_path_hash(*def_id),
+                Self::captured_mir_hash(body),
+            ));
+
+            let generics = tcx.generics_of(*def_id);
+            let generic_binding_mismatch = args.len() != generics.count();
+            projection.fill_generic_bindings(args.iter().enumerate(), |mut binding, (index, arg)| {
+                if index < generics.count() {
+                    binding.set_id(generics.param_at(index, tcx).name.as_str());
+                } else {
+                    // Preserve the actual argument, but do not invent a
+                    // parameter identity when compiler metadata disagrees.
+                    binding.set_id("");
+                }
+                Self::encode_gen_arg(tcx, enc_ctx, arg, binding.init_value());
+            });
+            let sig = tcx.fn_sig(*def_id).instantiate(tcx, args).skip_binder();
+            projection.fill_inputs(sig.inputs(), |out, input| {
+                Self::encode_ty(tcx, enc_ctx, *input, out);
+            });
+            Self::encode_ty(tcx, enc_ctx, sig.output(), projection.reborrow().init_output());
+
+            projection.set_block_count(body.basic_blocks.len().try_into().unwrap());
+            let statement_count = body.basic_blocks.iter().map(|block| block.statements.len()).sum::<usize>();
+            projection.set_statement_count(statement_count.try_into().unwrap());
+
+            // Classify and bound the body before encoding any block. In
+            // particular, unsupported terminators may contain calls, which
+            // would otherwise re-enter this projection builder recursively.
+            let unsupported_reason = if generic_binding_mismatch {
+                Some("callee generic arguments do not match its declared parameters")
+            } else {
+                Self::r23_projection_unsupported_reason(body, statement_count)
+            };
+            if body.local_decls.len() <= 16 {
+                projection.fill_local_decls(
+                    body.local_decls.iter_enumerated(),
+                    |out, (local, decl)| Self::encode_local_decl(tcx, enc_ctx, local, decl, out),
+                );
+            }
+            if let Some(reason) = unsupported_reason {
+                projection.set_unsupported_reason(reason);
+            } else {
+                projection.fill_basic_blocks(
+                    body.basic_blocks.iter_enumerated(),
+                    |out, (block, data)| {
+                        Self::encode_basic_block(tcx, enc_ctx, block, data, out, &[]);
+                    },
+                );
+            }
+            enc_ctx.mode = old_mode;
+            enc_ctx.region_scope_id = old_region_scope_id;
+        }
+
+        fn r23_projection_unsupported_reason(
+            body: &mir::Body<'tcx>,
+            statement_count: usize,
+        ) -> Option<&'static str> {
+            if body.local_decls.len() > 16 {
+                return Some("callee MIR exceeds the 16-local projection bound");
+            }
+            if statement_count > 16 {
+                return Some("callee MIR exceeds the 16-statement projection bound");
+            }
+            if body.basic_blocks.len() != 1 {
+                return Some("callee MIR has more than one basic block");
+            }
+            let Some(block) = body.basic_blocks.iter().next() else {
+                return Some("callee MIR has no basic block");
+            };
+            if !matches!(block.terminator().kind, mir::TerminatorKind::Return) {
+                return Some("callee MIR terminator is not Return");
+            }
+            for statement in &block.statements {
+                let mir::StatementKind::Assign((lhs, rvalue)) = &statement.kind else {
+                    return Some("callee MIR contains a non-assignment statement");
+                };
+                if !lhs.projection.is_empty() {
+                    return Some("callee MIR assignment does not target a bare local");
+                }
+                match rvalue {
+                    mir::Rvalue::Use(mir::Operand::Copy(_) | mir::Operand::Move(_), _) => {}
+                    mir::Rvalue::Cast(_, mir::Operand::Copy(_) | mir::Operand::Move(_), _) => {}
+                    _ => return Some("callee MIR contains an unsupported projection step"),
+                }
+            }
+            None
         }
 
         fn encode_operand(

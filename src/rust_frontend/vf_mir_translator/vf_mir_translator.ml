@@ -6,6 +6,11 @@ module LocAux = Src_loc_aux
 
 module DecoderAux = Decoder_aux
 
+(* R23's narrow array interpretation is enabled only while translating the
+   exact opted-in source body. The resulting type closures capture this
+   selection; unmarked bodies retain the historical unsupported array path. *)
+let r23_source_array3_interp_active = ref false
+
 module IntAux = struct
   module Make (StdintMod : sig
     type t
@@ -1817,12 +1822,28 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
         (loc, elem_ty, LiteralConstTypeExpr (loc, Z.of_big_int len))
     in
     let size = Ast.SizeofExpr (loc, TypeExpr vf_ty) in
+    let is_r23_u64_array3 =
+      !r23_source_array3_interp_active &&
+      D.decode_ty elem_ty_cpn = `Uint D.U64 &&
+      Big_int.compare_big_int len (Big_int.big_int_of_int 3) = 0
+    in
     let own tid vs =
-      Error "Expressing ownership of an array is not yet supported"
+      if is_r23_u64_array3 then
+        Ok
+          (Ast.CallExpr
+             (loc, "r23_u64_array3_own", [], [],
+              [Ast.LitPat tid; Ast.LitPat vs], Ast.Static))
+      else Error "Expressing ownership of an array is not yet supported"
     in
     let full_bor_content t l =
-      Error
-        "Expressing the full borrow content of an array is not yet supported"
+      if is_r23_u64_array3 then
+        Ok
+          (Ast.CallExpr
+             (loc, "r23_u64_array3_fbc", [], [],
+              [Ast.LitPat t; Ast.LitPat l], Ast.Static))
+      else
+        Error
+          "Expressing the full borrow content of an array is not yet supported"
     in
     let points_to tid l vid_op =
       let* pat = RustBelt.Aux.vid_op_to_var_pat vid_op loc in
@@ -1933,6 +1954,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
     ghost_decl_map : (string * Ast.decl) list;
     directives : Mir.annot list;
     fn_specializer : string -> D.generic_arg list -> string * D.generic_arg list;
+    r23_checked_slice_helper : BodyRd.t option;
   }
 
   and generated_glue_binding = {
@@ -1944,6 +1966,236 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
     glue_raw_trait_hash : string;
     glue_method_body : BodyRd.t;
   }
+
+  type r23_pure_slice_projection = {
+    r23_projection_input : string;
+    r23_projection_output : string;
+    r23_projection_steps : string list;
+    r23_projection_local_count : int;
+    r23_projection_local_mutabilities : string list;
+    r23_projection_block_count : int;
+    r23_projection_statement_count : int;
+  }
+
+  (* Normalize only a straight-line, one-input, cast-only body. This is a
+     structural equivalence check for the concrete slice data projection; it
+     deliberately rejects operations that could create references, access
+     memory, call code, or branch. Reference lifetime spellings are omitted
+     from this pure type key, while mutability and all pointee types remain. *)
+  let r23_projection_mutability mutability_cpn =
+    match MutabilityRd.get mutability_cpn with
+    | MutabilityRd.Mut -> "mut"
+    | MutabilityRd.Not -> "const"
+
+  let r23_projection_type_key loc generic_bindings ty =
+    let fail () = Ast.static_error loc
+      "R23 callee projection contains an unsupported or unbound type" None in
+    let rec key ty =
+      match TyKindRd.get (TyRd.kind_get ty) with
+      | TyKindRd.Ref ref_ty ->
+          "ref-" ^ r23_projection_mutability
+            (RefTyRd.mutability_get ref_ty) ^ "(" ^
+          key (RefTyRd.ty_get ref_ty) ^ ")"
+      | TyKindRd.RawPtr raw_ty ->
+          "raw-" ^ r23_projection_mutability
+            (RawPtrTyRd.mutability_get raw_ty) ^ "(" ^
+          key (RawPtrTyRd.ty_get raw_ty) ^ ")"
+      | TyKindRd.Slice elem -> "slice(" ^ key elem ^ ")"
+      | TyKindRd.Param name ->
+          (match List.assoc_opt name generic_bindings with
+           | Some resolved -> resolved
+           | None -> fail ())
+      | _ ->
+          (match D.decode_ty ty with
+           | `Uint D.U64 -> "u64"
+           | _ -> fail ())
+    in
+    key ty
+
+  let r23_pure_projection loc ~generic_bindings ~inputs ~output ~local_decls
+      ~basic_blocks ~reported_block_count ~reported_statement_count =
+    let fail reason = Ast.static_error loc
+      ("R23 callee projection refused: " ^ reason) None in
+    let block_count = List.length basic_blocks in
+    let statement_count = List.fold_left (fun total block ->
+      total + List.length (BasicBlockRd.statements_get_list block))
+      0 basic_blocks in
+    if block_count <> reported_block_count || statement_count <> reported_statement_count then
+      fail "reported body counts do not cover the complete block and statement lists";
+    if block_count <> 1 || List.length inputs <> 1 then
+      fail "projection is not a single-input straight-line body";
+    let local_types = List.map (fun local ->
+      let id = LocalDeclIdRd.name_get (LocalDeclRd.id_get local) in
+      (id, LocalDeclRd.ty_get local)) local_decls in
+    let local_mutabilities = List.map (fun local ->
+      r23_projection_mutability (LocalDeclRd.mutability_get local)) local_decls in
+    if List.length (List.sort_uniq String.compare (List.map fst local_types)) <>
+       List.length local_types then
+      fail "body has duplicate local declarations";
+    let local_ty id = match List.assoc_opt id local_types with
+      | Some ty -> ty
+      | None -> fail "projection operand or destination has no local declaration" in
+    let input_local, output_local = match local_decls with
+      | ret :: arg :: _ ->
+          let ret_id = LocalDeclIdRd.name_get (LocalDeclRd.id_get ret)
+          and arg_id = LocalDeclIdRd.name_get (LocalDeclRd.id_get arg) in
+          if ret_id <> "_0" || arg_id <> "_1" then
+            fail "MIR return and receiver local order is noncanonical";
+          (arg_id, ret_id)
+      | _ -> fail "body lacks return and receiver locals" in
+    let input_key = r23_projection_type_key loc generic_bindings (List.hd inputs)
+    and output_key = r23_projection_type_key loc generic_bindings output in
+    let local_input_key = r23_projection_type_key loc generic_bindings (local_ty input_local)
+    and local_output_key = r23_projection_type_key loc generic_bindings (local_ty output_local) in
+    if input_key <> "ref-mut(slice(u64))" || local_input_key <> input_key ||
+       output_key <> "raw-mut(u64)" || local_output_key <> output_key then
+      fail "signature is not exactly &mut [u64] -> *mut u64";
+    let block = List.hd basic_blocks in
+    if BasicBlockRd.is_cleanup_get block then
+      fail "projection body contains a cleanup block";
+    (match TerminatorKindRd.get
+       (TerminatorRd.kind_get (BasicBlockRd.terminator_get block)) with
+     | TerminatorKindRd.Return -> ()
+     | _ -> fail "projection body has a call, branch, or non-Return terminator");
+    let provenance = ref [input_local] in
+    let assigned = ref [] in
+    let step_edges = ref [] in
+    let steps = List.map (fun stmt ->
+      match StatementKindRd.get (StatementRd.kind_get stmt) with
+      | StatementKindRd.Assign data ->
+          let lhs = AssignDataRd.lhs_place_get data in
+          if PlaceRd.projection_get_list lhs <> [] then
+            fail "projection writes through a place projection";
+          let dst = LocalDeclIdRd.name_get (PlaceRd.local_get lhs) in
+          let cast = AssignDataRd.rhs_rvalue_get data in
+          (match RvalueRd.get cast with
+           | RvalueRd.Cast cast_data ->
+               let src = match OperandRd.get (CastDataRd.operand_get cast_data) with
+                 | OperandRd.Copy place | OperandRd.Move place
+                   when PlaceRd.projection_get_list place = [] ->
+                     LocalDeclIdRd.name_get (PlaceRd.local_get place)
+                 | _ -> fail "projection cast source is not a bare local" in
+               if not (List.mem src !provenance) ||
+                  List.mem dst !assigned || dst = input_local then
+                 fail "projection result is not a unique dataflow from the receiver";
+               let source_type = match OptionRd.get
+                   (CastDataRd.source_ty_get cast_data) with
+                 | OptionRd.Something ptr -> VfMirRd.of_pointer ptr
+                 | _ -> fail "projection cast omits its typed source" in
+               let target_type = CastDataRd.ty_get cast_data in
+               let source_key = r23_projection_type_key loc generic_bindings source_type
+               and target_key = r23_projection_type_key loc generic_bindings target_type
+               and local_source_key = r23_projection_type_key loc generic_bindings (local_ty src)
+               and local_target_key = r23_projection_type_key loc generic_bindings (local_ty dst) in
+               if source_key <> local_source_key || target_key <> local_target_key ||
+                  not (String.starts_with ~prefix:"raw-mut(" target_key) then
+                 fail "cast source/target types disagree with the local declarations";
+               let cast_kind = match CastKindRd.get (CastDataRd.kind_get cast_data) with
+                 | CastKindRd.PtrToPtr -> "ptr-to-ptr"
+                 | CastKindRd.PointerCoercion ->
+                     (match OptionRd.get
+                       (CastDataRd.pointer_coercion_data_get cast_data) with
+                      | OptionRd.Something ptr ->
+                          let coercion = VfMirRd.of_pointer ptr in
+                          (match PointerCoercionKindRd.get
+                              (PointerCoercionDataRd.kind_get coercion) with
+                           | PointerCoercionKindRd.Unsize -> "unsize"
+                           | _ -> fail "unsupported pointer coercion in projection")
+                      | _ -> fail "pointer coercion omits its typed kind")
+                 | _ -> fail "projection contains a non-pointer cast" in
+               provenance := dst :: !provenance;
+               assigned := dst :: !assigned;
+               step_edges := !step_edges @ [(src, dst)];
+               source_key ^ "->" ^ target_key ^ ":" ^ cast_kind
+           | _ -> fail "projection contains a non-cast rvalue")
+      | _ -> fail "projection contains a non-assignment statement")
+      (BasicBlockRd.statements_get_list block) in
+    if steps = [] || List.hd !assigned <> output_local ||
+       not (List.mem output_local !provenance) then
+      fail "returned raw pointer is not the final cast result";
+    let rec linear_chain expected = function
+      | [] -> expected = output_local
+      | (src, dst) :: rest ->
+          src = expected &&
+          linear_chain dst rest in
+    if not (linear_chain input_local !step_edges) then
+      fail "cast results do not form one complete linear projection from the receiver";
+    if List.length local_decls <> List.length steps + 1 ||
+       List.length !assigned <> List.length local_decls - 1 then
+      fail "body contains an unused, uninitialized, or unassigned local";
+    { r23_projection_input = input_key;
+      r23_projection_output = output_key;
+      r23_projection_steps = steps;
+      r23_projection_local_count = List.length local_decls;
+      r23_projection_local_mutabilities = local_mutabilities;
+      r23_projection_block_count = block_count;
+      r23_projection_statement_count = statement_count }
+
+  let r23_verify_checked_slice_helper loc projection helper_body =
+    let fail reason = Ast.static_error loc
+      ("R23 checked slice helper equivalence refused: " ^ reason) None in
+    let projection = VfMirRd.of_pointer projection in
+    let callee_name = canonicalize_item_name
+      (R23SliceProjectionRd.callee_name_get projection) in
+    if callee_name <> "std::slice::<impl [T]>::as_mut_ptr" then
+      fail "descriptor names a different standard callee";
+    if R23SliceProjectionRd.callee_def_path_hash_get projection = "" ||
+       R23SliceProjectionRd.mir_phase_get projection = "" ||
+       R23SliceProjectionRd.mir_debug_hash_get projection = "" then
+      fail "descriptor lacks standard callee identity or MIR phase/hash";
+    if R23SliceProjectionRd.unsupported_reason_get projection <> "" ||
+       R23SliceProjectionRd.unavailable_reason_get projection <> "" then
+      fail "exporter marked the standard callee body unsupported or unavailable";
+    let generic_bindings =
+      R23SliceProjectionRd.generic_bindings_get_list projection in
+    let u64_type_binding = List.filter_map (fun binding ->
+      let name = R23SliceProjectionGenericBindingRd.id_get binding in
+      match (D.decode_generic_arg
+        (R23SliceProjectionGenericBindingRd.value_get binding)).kind with
+      | Type (`Uint D.U64) when name = "T" -> Some (name, "u64")
+      | _ -> None) generic_bindings in
+    if List.length generic_bindings <> 1 ||
+       u64_type_binding <> [ ("T", "u64") ] then
+      fail "standard callee generic binding is not exactly T = u64";
+    let std_projection = r23_pure_projection loc
+      ~generic_bindings:u64_type_binding
+      ~inputs:(R23SliceProjectionRd.inputs_get_list projection)
+      ~output:(R23SliceProjectionRd.output_get projection)
+      ~local_decls:(R23SliceProjectionRd.local_decls_get_list projection)
+      ~basic_blocks:(R23SliceProjectionRd.basic_blocks_get_list projection)
+      ~reported_block_count:(Stdint.Uint32.to_int
+        (R23SliceProjectionRd.block_count_get projection))
+      ~reported_statement_count:(Stdint.Uint32.to_int
+        (R23SliceProjectionRd.statement_count_get projection)) in
+    let helper_name = TrName.translate_def_path
+      (BodyRd.def_path_get helper_body) in
+    if not (helper_name = "r23_checked_slice_as_mut_ptr" ||
+            String.ends_with ~suffix:"::r23_checked_slice_as_mut_ptr" helper_name) ||
+       BodyRd.def_path_hash_get helper_body = "" ||
+       BodyRd.captured_mir_phase_get helper_body = "" ||
+       BodyRd.captured_mir_hash_get helper_body = "" ||
+       Capnp.Array.is_empty
+         (ContractRd.annotations_get (BodyRd.contract_get helper_body)) then
+      fail "checked helper identity, captured MIR binding, or proof contract is missing";
+    (match BodyRd.generics_get_list helper_body with
+     | [param]
+       when GenericParamDefRd.name_get param = "a" &&
+            GenericParamDefKindRd.get
+              (GenericParamDefRd.kind_get param) =
+                GenericParamDefKindRd.Lifetime -> ()
+     | _ -> fail "checked helper signature is not exactly generic over one lifetime");
+    let helper_projection = r23_pure_projection loc ~generic_bindings:[]
+      ~inputs:(BodyRd.inputs_get_list helper_body)
+      ~output:(BodyRd.output_get helper_body)
+      ~local_decls:(BodyRd.local_decls_get_list helper_body)
+      ~basic_blocks:(BodyRd.basic_blocks_get_list helper_body)
+      ~reported_block_count:(List.length (BodyRd.basic_blocks_get_list helper_body))
+      ~reported_statement_count:(List.fold_left (fun total block ->
+        total + List.length (BasicBlockRd.statements_get_list block)) 0
+        (BodyRd.basic_blocks_get_list helper_body)) in
+    if std_projection <> helper_projection then
+      fail "checked helper's complete typed cast body differs from the actual std callee";
+    helper_name
 
   type var_id_trs_entry = { id : string; internal_name : string }
   type var_id_trs_map = var_id_trs_entry list
@@ -1965,6 +2217,30 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
     late_lft : string;
     late_close_stmt : Ast.stmt;
     late_recover_stmt : Ast.stmt;
+  }
+
+  type r23_source_array_adapter_plan = {
+    r23_pre_marker_loc : Ast.loc;
+    r23_pre_marker_end : Ast.loc;
+    r23_post_marker_loc : Ast.loc;
+    r23_post_marker_end : Ast.loc;
+    r23_pre_stmt : Ast.stmt;
+    r23_post_stmt : Ast.stmt;
+    r23_lifetime_token : string;
+    r23_values_local : string;
+    r23_begin_local : string;
+    r23_values_state : string;
+    mutable r23_ref_local : string option;
+    mutable r23_unsize_local : string option;
+    mutable r23_ref_seen : bool;
+    mutable r23_unsize_seen : bool;
+    mutable r23_call_seen : bool;
+    mutable r23_projection_approved : bool;
+    mutable r23_checked_helper_name : string option;
+    mutable r23_scoped_local_decls : Ast.stmt list;
+    mutable r23_scope_decls_inserted : bool;
+    mutable r23_unwind_epilogue : Ast.stmt list option;
+    r23_unwind_label : string;
   }
 
   type r9_guard_return_plan = {
@@ -2006,6 +2282,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
     val callback_scope_start : Ast.loc option
     val first_callback : first_callback_plan option
     val late_callback : late_callback_plan option
+    val r23_source_array_adapter : r23_source_array_adapter_plan option
     val r9_guard_return : r9_guard_return_plan option
     val r19_unwind_cleanup : (Ast.loc * Ast.stmt) option
   end) =
@@ -2023,6 +2300,10 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
       let callback_scope_start = Args.callback_scope_start
       let first_callback = Args.first_callback
       let late_callback = Args.late_callback
+      let r23_source_array_adapter = Args.r23_source_array_adapter
+      let r23_adapter_ref_assignment = ref false
+      let r23_adapter_unsize_assignment = ref false
+      let r23_adapter_post_bridge : Ast.stmt option ref = ref None
       let r9_guard_return = Args.r9_guard_return
       let r9_guard_return_used : (string * string * bool * string) list ref = ref []
       let r19_unwind_cleanup = Args.r19_unwind_cleanup
@@ -2455,8 +2736,8 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
             Big_int.compare_big_int value Big_int.unit_big_int = 0
         | _ -> false
       in
-      let translate_regular_fn_call substs fn_name =
-        let targs =
+      let translate_regular_fn_call ?targs_override substs fn_name =
+        let inferred_targs =
           substs
           |> Util.flatmap @@ function
              | Mir.GenArgType ty -> [ ty.vf_ty ]
@@ -2465,11 +2746,14 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
              | Mir.GenArgConst ty -> [ ty ]
         in
         let* targs =
-          match OptionRd.get ghost_generic_arg_list_opt_cpn with
-          | Nothing -> Ok targs
-          | Something ptr_cpn ->
-              let ghost_generic_arg_list_cpn = VfMirRd.of_pointer ptr_cpn in
-              translate_ghost_generic_arg_list ghost_generic_arg_list_cpn
+          match targs_override with
+          | Some targs -> Ok targs
+          | None ->
+              (match OptionRd.get ghost_generic_arg_list_opt_cpn with
+               | Nothing -> Ok inferred_targs
+               | Something ptr_cpn ->
+                   let ghost_generic_arg_list_cpn = VfMirRd.of_pointer ptr_cpn in
+                   translate_ghost_generic_arg_list ghost_generic_arg_list_cpn)
         in
         let projection_equality =
           let open Ast in
@@ -2895,6 +3179,72 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                 Ok
                   ( tmp_rvalue_binders,
                     FnCallResult (Ast.CastExpr (fn_loc, PtrTypeExpr (fn_loc, gen_arg_ty_info.vf_ty), arg)) )
+            | "std::slice::<impl [T]>::as_mut_ptr" ->
+                (match State.r23_source_array_adapter,
+                       substs, args, args_cpn with
+                 | Some plan,
+                   [Mir.GenArgType gen_arg_ty_info; _], [arg], [arg_cpn] ->
+                     let receiver_id = match OperandRd.get arg_cpn with
+                       | OperandRd.Copy place | OperandRd.Move place
+                         when PlaceRd.projection_get_list place = [] ->
+                           Some (LocalDeclIdRd.name_get
+                             (PlaceRd.local_get place))
+                       | _ -> None in
+                     let is_u64 = match gen_arg_ty_info.vf_ty with
+                       | Ast.ManifestTypeExpr (_, Ast.Int
+                           (Ast.Unsigned, Ast.FixedWidthRank 3)) -> true
+                       | _ -> false in
+                     if receiver_id <> plan.r23_unsize_local ||
+                        not plan.r23_ref_seen || not plan.r23_unsize_seen ||
+                        plan.r23_call_seen || not is_u64 ||
+                        not plan.r23_projection_approved
+                     then
+                       Ast.static_error fn_loc
+                         "R23 as_mut_ptr receiver/type/use differs from the admitted Ref-Unsize chain or checked callee projection"
+                         None;
+                     let helper_name = match plan.r23_checked_helper_name with
+                       | Some name -> name
+                       | None -> Ast.static_error fn_loc
+                           "R23 checked helper name is absent after projection admission"
+                           None in
+                     plan.r23_call_seen <- true;
+                     let k = Ast.Var (fn_loc, plan.r23_lifetime_token) in
+                     let t = Ast.Var (fn_loc, "t") in
+                     let p = Ast.Var (fn_loc, "r23_array_p") in
+                     let slice_raw_ty = Ast.PtrTypeExpr
+                       (fn_loc, Ast.SliceTypeExpr (fn_loc, gen_arg_ty_info.vf_ty)) in
+                     let slice_raw = Ast.CastExpr (fn_loc, slice_raw_ty, arg) in
+                     let pre_bridge = Ast.ExprStmt
+                       (Ast.CallExpr
+                          (fn_loc, "r23_array3_borrow_to_slice", [], [],
+                           [ Ast.LitPat k; Ast.LitPat t; Ast.LitPat p;
+                             Ast.LitPat slice_raw ], Ast.Static)) in
+                     let post_bridge = Ast.ExprStmt
+                       (Ast.CallExpr
+                          (fn_loc, "r23_slice_borrow_to_array3", [], [],
+                           [ Ast.LitPat k; Ast.LitPat t; Ast.LitPat p;
+                             Ast.LitPat slice_raw ], Ast.Static)) in
+                     State.r23_adapter_post_bridge := Some post_bridge;
+                     let* _, helper_call = translate_regular_fn_call
+                       ~targs_override:
+                         [Ast.IdentTypeExpr (fn_loc, None, "'r23_borrow")]
+                       [] helper_name in
+                     (* The helper is emitted from the paired source body and
+                        independently checked against the actual std callee
+                        projection during admission. Its verified contract
+                        retains the borrow and its body computes the data
+                        pointer. *)
+                     (match helper_call with
+                      | FnCallOutcome _ ->
+                          Ok (tmp_rvalue_binders @ [pre_bridge], helper_call)
+                      | FnCallResult _ -> Ast.static_error fn_loc
+                          "R23 checked helper call did not preserve its outcome"
+                          None)
+                 | None, _, _, _ -> translate_regular_fn_call substs fn_name
+                 | _ ->
+                     Ast.static_error fn_loc
+                       "R23 source adapter as_mut_ptr call shape changed after body admission"
+                       None)
             | "std::str::<impl str>::len" | "std::slice::<impl [T]>::len" | "std::ptr::const_ptr::<impl *const [T]>::len" | "std::ptr::mut_ptr::<impl *mut [T]>::len" ->
                 let [ arg ] = args in
                 Ok
@@ -3196,9 +3546,16 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                      (if dst_is_mutable then Mutation else Initialization),
                      e ))
             in
+            let assignment_with_r23_recovery e =
+              match State.r23_adapter_post_bridge with
+              | None -> assignment e
+              | Some recover ->
+                  Ast.BlockStmt
+                    (loc, [], [assignment e; recover], loc, ref [])
+            in
             let call_stmt =
               match fn_call_rexpr with
-              | FnCallResult e -> assignment e
+              | FnCallResult e -> assignment_with_r23_recovery e
               | FnCallOutcome e ->
                   if TranslatorArgs.ignore_unwind_paths then assignment e
                   else
@@ -3216,6 +3573,9 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                                   [ LitPat (Var (loc, "__result")) ],
                                   Static ),
                               [ assignment (Ast.Var (loc, "__result")) ] @
+                              (match State.r23_adapter_post_bridge with
+                               | Some recover -> [recover]
+                               | None -> []) @
                               (match late_callback_cleanup,
                                      first_callback_cleanup, callback_cleanup with
                                | Some (plan, _), None, None ->
@@ -3232,6 +3592,33 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                           Ast.SwitchStmtClause
                             ( loc,
                               CallExpr (loc, "unwinding", [], [], [], Static),
+                              (match State.r23_source_array_adapter with
+                               | Some plan ->
+                                   let recover = match State.r23_adapter_post_bridge with
+                                     | Some recover -> recover
+                                     | None -> Ast.static_error loc
+                                         "R23 slice recovery bridge is missing on unwind"
+                                         None in
+                                   if plan.r23_unwind_epilogue <> None then
+                                     Ast.static_error loc
+                                       "R23 source adapter generated more than one unwind epilogue"
+                                       None;
+                                   let array_to_array = Ast.ExprStmt (Ast.CallExpr
+                                     (loc, "array_to_array_", [], [],
+                                      [Ast.LitPat (Ast.CastExpr
+                                        (loc,
+                                         Ast.PtrTypeExpr
+                                           (loc, Ast.ManifestTypeExpr
+                                             (loc, Ast.Int
+                                               (Ast.Unsigned, Ast.FixedWidthRank 3))),
+                                         Ast.Var (loc, "r23_array_p")))], Ast.Static)) in
+                                   plan.r23_unwind_epilogue <- Some
+                                     [Ast.Assert (loc, Ast.False loc);
+                                      Ast.LabelStmt (loc, plan.r23_unwind_label);
+                                      fresh_first_callback_stmt plan.r23_post_stmt;
+                                      array_to_array] @ unwind_stmts;
+                                   [recover; Ast.GotoStmt (loc, plan.r23_unwind_label)]
+                               | None ->
                               (match late_callback_cleanup,
                                      first_callback_cleanup, callback_cleanup with
                                | Some (plan, _), None, None ->
@@ -3250,9 +3637,10 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                                     | Some s -> fresh_first_callback_stmt s :: unwind_stmts
                                     | None -> unwind_stmts)
                                | Some _, _, _ | _, Some _, Some _ ->
-                                   Ast.static_error loc "Overlapping callback recovery markers" None) );
+                                   Ast.static_error loc "Overlapping callback recovery markers" None)) );
                         ] )
             in
+            State.r23_adapter_post_bridge := None;
             (match late_callback_cleanup, call_stmt with
              | Some _, Ast.SwitchStmt (_, _, clauses) ->
                  if List.exists (function
@@ -3958,7 +4346,12 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                   true
               | [] -> false
           in
-          if ignore_ref_creation then
+          if State.r23_adapter_ref_assignment then
+            (* The marked reference is represented by its place pointer only.
+               The source marker has already created the RustBelt full borrow;
+               do not create a TreeBorrows ref_mut_end_token here. *)
+            Ok (`TrRvalueExpr (Ast.AddressOf (loc, place_expr)))
+          else if ignore_ref_creation then
             Ok (`TrRvalueExpr (Ast.AddressOf (loc, place_expr)))
           else
             let is_implicit = is_implicit_get ref_data_cpn in
@@ -4059,19 +4452,54 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
             in
             Ok (`TrRvalueExpr e)
           | _ ->
-          let* ty_info = translate_decoded_ty cast_data.ty loc in
-          let ty = ty_info.vf_ty in
-          match operand with
-          | `TrOperandCopy expr
-          | `TrOperandMove (expr, _ (*place_is_mutable*))
-          | `TrTypedConstantScalar expr ->
-              Ok (`TrRvalueExpr (Ast.CastExpr (loc, ty, expr)))
-          | `TrTypedConstantRvalueBinderBuilder rvalue_binder_builder ->
-              failwith "Todo: Rvalue::Cast"
-              (*Todo @Nima: We need a better design (refactor) for passing different results of operand translation*)
-          | `TrTypedConstantFn fn_def_ty_cpn ->
-              let fn_name = fn_def_ty_cpn.id.name in
-              Ok (`TrRvalueExpr (Ast.CastExpr (loc, ty, Var (loc, fn_name)))))
+          match State.r23_adapter_unsize_assignment, operand with
+          | true,
+            (`TrOperandCopy expr | `TrOperandMove (expr, _) |
+             `TrTypedConstantScalar expr) ->
+              let u64_ty = Ast.ManifestTypeExpr
+                (loc, Ast.Int (Ast.Unsigned, Ast.FixedWidthRank 3)) in
+              let data_ptr = Ast.CastExpr
+                (loc, Ast.PtrTypeExpr (loc, u64_ty), expr) in
+              let len = Ast.IntLit
+                (loc, Big_int.big_int_of_int 3, true, true, Ast.NoLSuffix) in
+              let slice_ptr = Ast.CallExpr
+                (loc, "std::ptr::slice_from_raw_parts_mut", [u64_ty], [],
+                 [Ast.LitPat data_ptr; Ast.LitPat len], Ast.Static) in
+              (* Keep the compiler-exported temporary type. An erased MIR
+                 region is recorded unchanged, but this one proof AST
+                 temporary is instantiated at the explicit source interval.
+                 It is a block local in that interval (never a function-scope
+                 declaration), and the checked full-borrow conversion below
+                 supplies its only authority. *)
+              let* slice_ref_ty_info = translate_decoded_ty cast_data.ty loc in
+              let slice_ref_ty = match slice_ref_ty_info.vf_ty with
+                | Ast.RustRefTypeExpr (at, _, Ast.Mutable,
+                    (Ast.SliceTypeExpr _ as slice_ty)) ->
+                    Ast.RustRefTypeExpr
+                      (at, Ast.IdentTypeExpr (at, None, "'r23_borrow"),
+                       Ast.Mutable, slice_ty)
+                | _ -> Ast.static_error loc
+                    "R23 Unsize target proof type is not a mutable u64 slice reference"
+                    None in
+              (* The fat pointer is constructed with checked length metadata.
+                 The type cast itself carries no ownership; the already-checked
+                 source borrow plan converts the exact full_borrow resource. *)
+              Ok (`TrRvalueExpr
+                (Ast.CastExpr (loc, slice_ref_ty, slice_ptr)))
+          | _ ->
+              let* ty_info = translate_decoded_ty cast_data.ty loc in
+              let ty = ty_info.vf_ty in
+              match operand with
+              | `TrOperandCopy expr
+              | `TrOperandMove (expr, _ (*place_is_mutable*))
+              | `TrTypedConstantScalar expr ->
+                  Ok (`TrRvalueExpr (Ast.CastExpr (loc, ty, expr)))
+              | `TrTypedConstantRvalueBinderBuilder rvalue_binder_builder ->
+                  failwith "Todo: Rvalue::Cast"
+                  (*Todo @Nima: We need a better design (refactor) for passing different results of operand translation*)
+              | `TrTypedConstantFn fn_def_ty_cpn ->
+                  let fn_name = fn_def_ty_cpn.id.name in
+                  Ok (`TrRvalueExpr (Ast.CastExpr (loc, ty, Var (loc, fn_name)))))
       | BinaryOp bin_op_data_cpn ->
           let* operator, operandl, operandr =
             translate_binary_operation bin_op_data_cpn loc
@@ -4161,9 +4589,37 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
             translate_place lhs_place_cpn loc
           in
           let rhs_rvalue_cpn = AssignData.rhs_rvalue_get assign_data_cpn in
-          let* rhs_rvalue =
+          let lhs_local =
+            if PlaceRd.projection_get_list lhs_place_cpn <> [] then None
+            else Some (LocalDeclIdRd.name_get
+              (PlaceRd.local_get lhs_place_cpn)) in
+          (match State.r23_source_array_adapter, lhs_local,
+                 RvalueRd.get rhs_rvalue_cpn with
+           | Some plan, Some local, RvalueRd.Ref _
+             when Some local = plan.r23_ref_local ->
+               if plan.r23_ref_seen then
+                 Ast.static_error loc "R23 array Ref assignment was translated more than once" None;
+               plan.r23_ref_seen <- true;
+               State.r23_adapter_ref_assignment := true
+           | Some plan, Some local, RvalueRd.Cast _
+             when Some local = plan.r23_unsize_local ->
+               if plan.r23_unsize_seen then
+                 Ast.static_error loc "R23 array Unsize assignment was translated more than once" None;
+               plan.r23_unsize_seen <- true;
+               State.r23_adapter_unsize_assignment := true
+           | Some plan, Some local, _
+             when Some local = plan.r23_ref_local ||
+                  Some local = plan.r23_unsize_local ->
+               Ast.static_error loc "R23 source adapter assignment changed after body admission" None
+           | _ -> ());
+          let rhs_rvalue_result =
             Rocq_writer.rocq_print_argument TranslatorArgs.rocq_writer @@ fun () ->
-            translate_rvalue rhs_rvalue_cpn loc
+              translate_rvalue rhs_rvalue_cpn loc
+          in
+          State.r23_adapter_ref_assignment := false;
+          State.r23_adapter_unsize_assignment := false;
+          let* rhs_rvalue =
+            rhs_rvalue_result
           in
           match rhs_rvalue with
           | `TrRvalueExpr rhs_expr ->
@@ -4729,12 +5185,28 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                            (l, "#strict_lft_binding_scope",
                             [Ast.IdentTypeExpr (l, None, name)], [], [], Ast.Static)) ]
               in
+              let r23_scoped_decls =
+                match State.r23_source_array_adapter with
+                | Some plan
+                  when (let ((file, line, _), _) = Ast.lexed_loc l
+                        and ((pre_file, pre_line, _), _) =
+                          Ast.lexed_loc plan.r23_pre_marker_loc in
+                        file = pre_file && line = pre_line) ->
+                    if plan.r23_scope_decls_inserted then
+                      Ast.static_error plan.r23_pre_marker_loc
+                        "R23 scoped local declarations were inserted more than once"
+                        None;
+                    plan.r23_scope_decls_inserted <- true;
+                    plan.r23_scoped_local_decls
+                | _ -> []
+              in
               ( external_predecessor_count + internal_predecessor_count,
                 [
                   Ast.BlockStmt
                     ( loc,
                       decls,
-                      strict_scope_start @ (Ast.LabelStmt (loc, id)
+                      strict_scope_start @ r23_scoped_decls @
+                      (Ast.LabelStmt (loc, id)
                       :: (stmts0
                          @ [ Ast.GotoStmt (lg, target) ]
                          @ children_stmts)),
@@ -5802,6 +6274,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
   let translate_body (body_tr_defs_ctx : body_tr_defs_ctx) (body_cpn : BodyRd.t)
       =
     let open BodyRd in
+    r23_source_array3_interp_active := false;
     let is_generated_glue =
       VfMirRd.GeneratedGlue.enabled_get (generated_glue_get body_cpn) in
     (* This is a source-admission count, not a parser for annotations.  Every
@@ -5866,7 +6339,650 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
            | None -> None)
       | _ -> None
     in
+    let r23_adapter_marker name stmt =
+      let unpure = function Ast.PureStmt (_, inner) -> inner | stmt -> stmt in
+      match unpure stmt with
+      | Ast.BlockStmt (loc, [], head :: commands, close, _) ->
+          let head = unpure head in
+          (match head with
+           | Ast.ExprStmt
+               (Ast.CallExpr (_, found, [], [], args, Ast.Static))
+             when found = name -> Some (loc, close, args, commands)
+           | _ -> None)
+      | Ast.ExprStmt
+          (Ast.CallExpr (loc, found, [], [], args, Ast.Static))
+        when found = name -> Some (loc, loc, args, [])
+      | _ -> None
+    in
+    let r23_raw_marker_call name stmt =
+      let unpure = function Ast.PureStmt (_, inner) -> inner | stmt -> stmt in
+      let is_call = function
+        | Ast.ExprStmt (Ast.CallExpr (_, found, _, _, _, Ast.Static))
+        | Ast.CallExpr (_, found, _, _, _, Ast.Static) -> found = name
+        | _ -> false in
+      match unpure stmt with
+      | Ast.BlockStmt (_, _, head :: _, _, _) -> is_call (unpure head)
+      | other -> is_call other
+    in
+    let r23_pre_marker_vars = function
+      | [Ast.LitPat (Ast.Var (_, token)); Ast.LitPat (Ast.Var (_, values))] ->
+          Some (token, values)
+      | _ -> None
+    in
+    let r23_post_marker_vars = function
+      | [Ast.LitPat (Ast.Var (_, token)); Ast.LitPat (Ast.Var (_, values));
+         Ast.LitPat (Ast.Var (_, begin_local)); Ast.LitPat (Ast.Var (_, state))] ->
+          Some (token, values, begin_local, state)
+      | _ -> None
+    in
     let marked name = List.filter_map (block_marker name) ghost_stmts in
+    let r23_pre_markers =
+      List.filter_map (r23_adapter_marker "r23_source_array_borrow_adapter")
+        ghost_stmts
+    in
+    let r23_post_markers =
+      List.filter_map (r23_adapter_marker "r23_source_array_borrow_adapter_end")
+        ghost_stmts
+    in
+    let r23_source_adapter_enabled =
+      Sys.getenv_opt "SMALLSORT_R23_SOURCE_ARRAY_BORROW" = Some "1"
+    in
+    let r23_source_array_adapter =
+      match r23_pre_markers, r23_post_markers with
+      | [], [] ->
+          if List.exists (r23_raw_marker_call "r23_source_array_borrow_adapter") ghost_stmts ||
+             List.exists (r23_raw_marker_call "r23_source_array_borrow_adapter_end") ghost_stmts
+          then Ast.static_error fn_sig_loc
+            "Malformed R23 source array adapter marker" None
+          else None
+      | [pre_loc, pre_end, pre_args, pre_commands],
+        [post_loc, post_end, post_args, post_commands] ->
+          let fail loc reason =
+            Ast.static_error loc
+              ("R23 source array adapter marker refused: " ^ reason) None
+          in
+          if not r23_source_adapter_enabled then
+            fail pre_loc "the explicit R23 source-adapter opt-in is disabled";
+          if TranslatorArgs.ignore_unwind_paths then
+            fail pre_loc "the R23 source adapter requires checked unwind outcomes";
+          let body_name = TrName.translate_def_path (def_path_get body_cpn) in
+          if not (body_name = "b2_three_from_local" ||
+                  String.ends_with ~suffix:"::b2_three_from_local" body_name)
+          then fail pre_loc "marker outside b2_three_from_local";
+          let token, values = match r23_pre_marker_vars pre_args with
+            | Some args -> args
+            | None -> fail pre_loc "pre marker argument shape mismatch" in
+          let post_token, post_values, begin_local, values_state =
+            match r23_post_marker_vars post_args with
+            | Some args -> args
+            | None -> fail post_loc "post marker argument shape mismatch" in
+          let ((pre_file, pre_line, _), _) = Ast.lexed_loc pre_loc in
+          let ((pre_end_file, pre_end_line, _), _) = Ast.lexed_loc pre_end in
+          let ((post_file, post_line, _), _) = Ast.lexed_loc post_loc in
+          let ((post_end_file, post_end_line, _), _) = Ast.lexed_loc post_end in
+          if token <> "r23_borrow_k" || post_token <> token ||
+             values <> "values" || post_values <> values ||
+             begin_local <> "begin" || values_state <> "r23_borrow_values" then
+            fail pre_loc "marker binders do not match the canonical source site";
+          if pre_file <> pre_end_file || pre_file <> post_file ||
+             pre_file <> post_end_file || pre_line >= post_line ||
+             pre_end_line > post_line || post_end_line < post_line then
+            fail pre_loc "markers are not ordered in one source file";
+          if pre_commands <> [] || post_commands <> [] then
+            fail pre_loc "R23 line markers must be zero-authority single statements";
+          let unpure = function
+            | Ast.PureStmt (_, stmt) -> stmt
+            | stmt -> stmt in
+          let direct_call = function
+            | Ast.ExprStmt (Ast.CallExpr (_, name, _, _, args, Ast.Static)) ->
+                Some (name, args)
+            | _ -> None in
+          let direct_calls commands = List.filter_map
+            (fun stmt -> direct_call (unpure stmt)) commands in
+          let source_loc stmt = fst (Ast.lexed_loc (Ast.stmt_loc stmt)) in
+          let (pre_pos_file, pre_pos_line, _) = fst (Ast.lexed_loc pre_loc) in
+          let (post_pos_file, post_pos_line, _) = fst (Ast.lexed_loc post_loc) in
+          let pre_source_commands = List.filter (fun stmt ->
+            let (file, line, _) = source_loc stmt in
+            file = pre_pos_file && file = post_pos_file &&
+            pre_pos_line < line && line < post_pos_line)
+              ghost_stmts in
+          let rec take_post_commands acc = function
+            | [] -> fail post_loc "post annotation sequence lacks Array_to_array"
+            | stmt :: rest ->
+                let acc = acc @ [stmt] in
+                (match direct_call (unpure stmt) with
+                 | Some ("Array_to_array", _) -> acc
+                 | _ -> take_post_commands acc rest)
+          in
+          let post_candidates = List.filter (fun stmt ->
+            let (file, line, _) = source_loc stmt in
+            file = post_pos_file && line > post_pos_line) ghost_stmts in
+          let post_source_commands = take_post_commands [] post_candidates in
+          let calls_are expected commands =
+            List.map fst (direct_calls commands) = expected in
+          let annotation_shape stmt =
+            match unpure stmt with
+            | Ast.DeclStmt (_, declarations) ->
+                (match declarations with
+                 | [(_, _, name, _, _)] -> "decl:" ^ name
+                 | _ -> "decl:multiple")
+            | Ast.Assert _ -> "assert"
+            | Ast.Open (_, _, name, _, _, _, _) -> "open:" ^ name
+            | Ast.Close (_, _, name, _, _, _, _) -> "close:" ^ name
+            | Ast.ExprStmt (Ast.CallExpr (_, name, _, _, _, Ast.Static)) ->
+                "call:" ^ name
+            | _ -> "other"
+          in
+          let pre_shape = List.map annotation_shape pre_source_commands in
+          let post_shape = List.map annotation_shape post_source_commands in
+          if pre_shape <>
+             ["decl:r23_array_p"; "assert"; "call:array_to_Array";
+              "assert"; "call:r9_make_u64_owners";
+              "close:r23_u64_array3_own"; "close:r23_u64_array3_fbc";
+              "call:borrow"] then
+            fail pre_loc "pre annotations differ from the exact checked array3 ownership sequence";
+          if post_shape <>
+             ["call:end_lifetime"; "call:borrow_end";
+              "call:r23_dispose_dead_array3_borrow";
+              "open:r23_u64_array3_fbc"; "assert";
+              "open:r23_u64_array3_own"; "call:r9_drop_u64_owners";
+              "call:Array_to_array"] then
+            fail post_loc "post annotations differ from the exact checked physical owner restoration sequence";
+          if not (calls_are ["array_to_Array"; "r9_make_u64_owners"; "borrow"]
+                    pre_source_commands) then
+            fail pre_loc "pre annotation sequence is not the exact checked array owner and borrow setup";
+          if not (calls_are ["end_lifetime"; "borrow_end";
+                              "r23_dispose_dead_array3_borrow";
+                              "r9_drop_u64_owners"; "Array_to_array"]
+                    post_source_commands) then
+            fail post_loc "post annotation sequence is not the exact checked borrow and owner restoration";
+          let is_fbc_arg = function
+            | Ast.LitPat
+                (Ast.CallExpr (_, "r23_u64_array3_fbc", [], [],
+                  [Ast.LitPat (Ast.Var (_, "t"));
+                   Ast.LitPat (Ast.Var (_, "r23_array_p"))], Ast.Static)) -> true
+            | _ -> false in
+          let pre_protocol = direct_calls pre_source_commands |> List.filter
+            (fun (name, _) -> name = "borrow") in
+          let post_protocol = direct_calls post_source_commands |> List.filter
+            (fun (name, _) -> name = "end_lifetime" || name = "borrow_end") in
+          (match pre_protocol with
+           | [("borrow", [Ast.LitPat (Ast.Var (_, found)); p])]
+             when found = token && is_fbc_arg p -> ()
+           | _ -> fail pre_loc
+               "pre marker must borrow the exact r23 array3 full-borrow content");
+          (match post_protocol with
+           | [("end_lifetime", [Ast.LitPat (Ast.Var (_, found1))]);
+              ("borrow_end", [Ast.LitPat (Ast.Var (_, found2)); p])]
+             when found1 = token && found2 = token && is_fbc_arg p -> ()
+           | _ -> fail post_loc
+               "post marker must end and restore the same r23 array3 full-borrow content");
+          let source_lft_name = "'r23_borrow" in
+          let has_lft_binding =
+            List.exists (function
+              | Ast.BlockStmt (_, decls, _, _, _) ->
+                  List.exists (function
+                    | Ast.TypeWithTypeidDecl (_, name,
+                        Ast.CallExpr (_, "typeid_of_lft", [], [],
+                          [Ast.LitPat (Ast.Var (_, found))], Ast.Static))
+                      -> name = source_lft_name && found = token
+                    | _ -> false) decls
+              | _ -> false) ghost_decl_blocks
+          in
+          if not has_lft_binding then
+            fail pre_loc "missing explicit let_lft 'r23_borrow = r23_borrow_k binding";
+          let is_begin_lifetime = function
+            | Ast.CallExpr (_, "begin_lifetime", [], [], [], Ast.Static) -> true
+            | _ -> false in
+          let fresh_token_decls = List.filter_map (function
+            | Ast.DeclStmt (loc, [(_, None, name, Some init, _)])
+            | Ast.PureStmt (loc, Ast.DeclStmt (_, [(_, None, name, Some init, _)]))
+              when name = token && is_begin_lifetime init -> Some loc
+            | _ -> None) ghost_stmts in
+          let token_precedes_marker loc =
+            let ((token_file, token_line, _), _) = Ast.lexed_loc loc in
+            let ((marker_file, marker_line, _), _) = Ast.lexed_loc pre_loc in
+            token_file = marker_file && token_line < marker_line in
+          (match fresh_token_decls with
+           | [loc] when token_precedes_marker loc -> ()
+           | [_] -> fail pre_loc
+               "begin_lifetime token is not declared before the source adapter marker"
+           | [] -> fail pre_loc
+               "source adapter lifetime token is not the result of begin_lifetime"
+           | _ -> fail pre_loc
+               "source adapter lifetime token has multiple begin_lifetime declarations");
+          Some
+            { r23_pre_marker_loc = pre_loc;
+              r23_pre_marker_end = pre_end;
+              r23_post_marker_loc = post_loc;
+              r23_post_marker_end = post_end;
+              r23_pre_stmt = Ast.NoopStmt pre_loc;
+              r23_post_stmt = Ast.PureStmt (post_loc,
+                Ast.BlockStmt (post_loc, [], post_source_commands,
+                  (Ast.stmt_loc (List.hd (List.rev post_source_commands))), ref []));
+              r23_lifetime_token = token;
+              r23_values_local = values;
+              r23_begin_local = begin_local;
+              r23_values_state = values_state;
+              r23_ref_local = None;
+              r23_unsize_local = None;
+              r23_ref_seen = false;
+              r23_unsize_seen = false;
+              r23_call_seen = false;
+              r23_projection_approved = false;
+              r23_checked_helper_name = None;
+              r23_scoped_local_decls = [];
+              r23_scope_decls_inserted = false;
+              r23_unwind_epilogue = None;
+              r23_unwind_label = "#merge_r23_source_borrow_unwind" }
+      | (loc, _, _, _) :: _, _ | _, (loc, _, _, _) :: _ ->
+          Ast.static_error loc
+            "R23 source array adapter requires exactly one pre/post marker pair"
+            None
+    in
+    let* r23_source_array_adapter =
+      match r23_source_array_adapter with
+      | None -> Ok None
+      | Some plan ->
+          let refuse loc why =
+            Ast.static_error loc
+              ("R23 source array adapter MIR binding refused: " ^ why) None
+          in
+          let place_local place =
+            if PlaceRd.projection_get_list place <> [] then None
+            else Some (LocalDeclIdRd.name_get (PlaceRd.local_get place))
+          in
+          let source_local_id surf_name =
+            let ids = List.filter_map (fun vdi ->
+              if translate_symbol (VarDebugInfoRd.name_get vdi) <> surf_name then None
+              else match VarDebugInfoContentsRd.get
+                  (VarDebugInfoRd.value_get vdi) with
+                | VarDebugInfoContentsRd.Place place -> place_local place
+                | _ -> None)
+              (var_debug_info_get_list body_cpn)
+              |> List.sort_uniq String.compare in
+            match ids with
+            | [id] -> id
+            | [] -> refuse plan.r23_pre_marker_loc
+                ("source local has no unique MIR binding: " ^ surf_name)
+            | _ -> refuse plan.r23_pre_marker_loc
+                ("source local has ambiguous MIR bindings: " ^ surf_name)
+          in
+          let values_id = source_local_id plan.r23_values_local in
+          let begin_id = source_local_id plan.r23_begin_local in
+          let is_u64_array3_ty ty_cpn loc =
+            match TyKindRd.get (TyRd.kind_get ty_cpn) with
+            | TyKindRd.Array array_ty ->
+                if D.decode_ty (ArrayTyRd.elem_ty_get array_ty) <> `Uint D.U64
+                then Ok false
+                else
+                  let* len_expr = translate_ty_const
+                    (ArrayTyRd.size_get array_ty) loc in
+                  (match len_expr with
+                   | Ast.CastExpr (_, _, Ast.IntLit (_, n, _, _, _))
+                   | Ast.IntLit (_, n, _, _, _) ->
+                       Ok (Big_int.compare_big_int n
+                         (Big_int.big_int_of_int 3) = 0)
+                   | _ -> Ok false)
+            | _ -> Ok false
+          in
+          let local_decl_ty local_id =
+            List.find_opt (fun decl ->
+              LocalDeclIdRd.name_get (LocalDeclRd.id_get decl) = local_id)
+              (local_decls_get_list body_cpn)
+          in
+          let* values_is_array3 =
+            match local_decl_ty values_id with
+            | Some decl -> is_u64_array3_ty
+                (LocalDeclRd.ty_get decl) plan.r23_pre_marker_loc
+            | None -> refuse plan.r23_pre_marker_loc
+                "array local declaration is absent"
+          in
+          if not values_is_array3 then
+            refuse plan.r23_pre_marker_loc
+              "marked local is not exactly [u64; 3]";
+          let operand_local op =
+            match OperandRd.get op with
+            | OperandRd.Copy place | OperandRd.Move place -> place_local place
+            | _ -> None
+          in
+          let array3_refs = ref [] in
+          let unsize_casts = ref [] in
+          let assign_records = ref [] in
+          let analyze_stmt stmt =
+            match StatementKindRd.get (StatementRd.kind_get stmt) with
+            | StatementKindRd.Assign data ->
+                let lhs = place_local
+                  (StatementKindRd.AssignData.lhs_place_get data) in
+                let rhs = StatementKindRd.AssignData.rhs_rvalue_get data in
+                assign_records :=
+                  (StatementKindRd.AssignData.lhs_place_get data, rhs, stmt)
+                  :: !assign_records;
+                (match lhs, RvalueRd.get rhs with
+                 | Some dst, RvalueRd.Ref ref_data ->
+                     let source = place_local (RefDataRd.place_get ref_data) in
+                     let is_mut = match RefBorrowKindRd.get
+                         (RefDataRd.bor_kind_get ref_data) with
+                       | RefBorrowKindRd.Mut -> true
+                       | _ -> false in
+                     let* is_array3 = is_u64_array3_ty
+                       (RefDataRd.place_ty_get ref_data)
+                       plan.r23_pre_marker_loc in
+                     if source = Some values_id && is_mut && is_array3 then
+                       array3_refs := (dst, ref_data, stmt) :: !array3_refs;
+                     Ok ()
+                 | Some dst, RvalueRd.Cast cast_data ->
+                     let cast_source = match OptionRd.get
+                         (CastDataRd.source_ty_get cast_data) with
+                       | OptionRd.Something ptr -> Some (VfMirRd.of_pointer ptr)
+                       | _ -> None in
+                     let target_ty = CastDataRd.ty_get cast_data in
+                     let source_ref_is_array3 = match cast_source with
+                       | Some ty ->
+                           (match D.decode_ty ty with
+                            | `Ref (_, true, `Array) -> true
+                            | _ -> false)
+                       | None -> false in
+                     let target_ref_is_u64_slice =
+                       match D.decode_ty target_ty with
+                       | `Ref (_, true, `Slice (`Uint D.U64)) -> true
+                       | _ -> false in
+                     let pointer_coercion =
+                       match CastKindRd.get (CastDataRd.kind_get cast_data) with
+                       | CastKindRd.PointerCoercion -> true
+                       | _ -> false in
+                     let unsize = match OptionRd.get
+                         (CastDataRd.pointer_coercion_data_get cast_data) with
+                       | OptionRd.Something ptr ->
+                           let data = VfMirRd.of_pointer ptr in
+                           let kind_is_unsize = match PointerCoercionKindRd.get
+                               (PointerCoercionDataRd.kind_get data) with
+                             | PointerCoercionKindRd.Unsize -> true
+                             | _ -> false in
+                           let source_is_implicit = match PointerCoercionSourceRd.get
+                               (PointerCoercionDataRd.coercion_source_get data) with
+                             | PointerCoercionSourceRd.Implicit -> true
+                             | _ -> false in
+                           pointer_coercion && kind_is_unsize && source_is_implicit
+                       | _ -> false in
+                     (match source_ref_is_array3, target_ref_is_u64_slice,
+                            unsize, operand_local
+                              (CastDataRd.operand_get cast_data) with
+                      | true, true, true, Some src ->
+                          let* source_is_array3 = match cast_source with
+                            | Some ty -> is_u64_array3_ty
+                                (match TyKindRd.get (TyRd.kind_get ty) with
+                                 | TyKindRd.Ref ref_ty -> RefTyRd.ty_get ref_ty
+                                 | _ -> ty)
+                                plan.r23_pre_marker_loc
+                            | None -> Ok false in
+                          if source_is_array3 then
+                            unsize_casts := (src, dst, cast_data, stmt)
+                              :: !unsize_casts;
+                          Ok ()
+                      | _ -> Ok ())
+                 | _ -> Ok ())
+            | _ -> Ok ()
+          in
+          let* _ = ListAux.try_map analyze_stmt
+            (List.concat_map BasicBlockRd.statements_get_list
+              (basic_blocks_get_list body_cpn)) in
+          let ref_dst, ref_data, ref_stmt = match !array3_refs with
+            | [one] -> one
+            | [] -> refuse plan.r23_pre_marker_loc
+                "no unique mutable Ref of the marked array local"
+            | _ -> refuse plan.r23_pre_marker_loc
+                "multiple mutable Ref candidates for the marked array local"
+          in
+          let cast_data, cast_dst, cast_stmt = match
+              List.filter_map (fun (src, dst, data, stmt) ->
+                if src = ref_dst then Some (data, dst, stmt) else None)
+              !unsize_casts with
+            | [one] -> one
+            | [] -> refuse plan.r23_pre_marker_loc
+                "no unique exact Unsize cast consumes the mutable array Ref"
+            | _ -> refuse plan.r23_pre_marker_loc
+                "multiple Unsize casts consume the mutable array Ref"
+          in
+          let ref_local_ty = match local_decl_ty ref_dst with
+            | Some decl -> Some (LocalDeclRd.ty_get decl)
+            | None -> None in
+          let cast_local_ty = match local_decl_ty cast_dst with
+            | Some decl -> Some (LocalDeclRd.ty_get decl)
+            | None -> None in
+          let* ref_local_is_array3 = match ref_local_ty with
+            | Some ty ->
+                (match D.decode_ty ty, TyKindRd.get (TyRd.kind_get ty) with
+                 | `Ref (_, true, `Array), TyKindRd.Ref ref_ty ->
+                     is_u64_array3_ty (RefTyRd.ty_get ref_ty)
+                       plan.r23_pre_marker_loc
+                 | _ -> Ok false)
+            | None -> Ok false in
+          let cast_local_is_slice = match cast_local_ty with
+            | Some ty ->
+                (match D.decode_ty ty with
+                 | `Ref (_, true, `Slice (`Uint D.U64)) -> true
+                 | _ -> false)
+            | None -> false in
+          if not ref_local_is_array3 || not cast_local_is_slice then
+            refuse plan.r23_pre_marker_loc
+              "reference temporary local declarations disagree with Ref/Unsize types";
+          let region_identity region =
+            match OptionRd.get (RegionRd.identity_get region) with
+            | OptionRd.Something ptr ->
+                let identity = VfMirRd.of_pointer ptr in
+                (match RegionIdentityRd.get identity with
+                 | RegionIdentityRd.InferenceVariable variable ->
+                     Some
+                       ( RegionInferenceVariableRd.scope_id_get variable,
+                         Stdint.Uint32.to_string
+                           (RegionInferenceVariableRd.variable_id_get variable) )
+                 | RegionIdentityRd.Erased _ -> None)
+            | _ -> None
+          in
+          let ty_region ty =
+            match TyKindRd.get (TyRd.kind_get ty) with
+            | TyKindRd.Ref ref_ty -> Some (RefTyRd.region_get ref_ty)
+            | _ -> None
+          in
+          let cast_source_ty = match OptionRd.get
+              (CastDataRd.source_ty_get cast_data) with
+            | OptionRd.Something ptr -> Some (VfMirRd.of_pointer ptr)
+            | _ -> None in
+          let cast_target_ty = CastDataRd.ty_get cast_data in
+          let all_region_identities =
+            [ Some (region_identity (RefDataRd.region_get ref_data));
+              (match cast_source_ty with
+               | Some ty -> Option.map region_identity (ty_region ty)
+               | None -> None);
+              Option.map region_identity (ty_region cast_target_ty) ]
+            |> List.filter_map (fun x -> x)
+          in
+          let typed_region_identities = List.filter_map (fun x -> x) all_region_identities in
+          let body_region_scope = BodyRd.region_scope_id_get body_cpn in
+          (match typed_region_identities with
+           | [] -> () (* Erased/absent compiler identity: the explicit unique source scope is used. *)
+           | (scope, variable) :: rest ->
+               if scope = "" || scope <> body_region_scope ||
+                  List.length typed_region_identities <> List.length all_region_identities ||
+                  not (List.for_all (fun (scope', variable') ->
+                    scope' = scope && variable' = variable) rest) then
+                 refuse plan.r23_pre_marker_loc
+                   "typed MIR region identities are missing, cross-scope, or inconsistent");
+          if ref_dst = cast_dst || cast_dst = values_id then
+            refuse plan.r23_pre_marker_loc "reference temporaries alias source places";
+          let ref_uses = ref 0 and cast_uses = ref 0 in
+          let rooted_local place =
+            Some (LocalDeclIdRd.name_get (PlaceRd.local_get place)) in
+          let count_place id place =
+            if rooted_local place = Some id then
+              incr (if id = ref_dst then ref_uses else cast_uses)
+          in
+          let count_operand id operand =
+            match OperandRd.get operand with
+            | OperandRd.Copy place | OperandRd.Move place -> count_place id place
+            | OperandRd.Constant _ -> ()
+          in
+          List.iter (fun (lhs, rv, _) ->
+            (* These are temporary references: any overwrite or projected
+               place use is an escape/ambiguity, just like an extra copy. *)
+            let lhs_root = rooted_local lhs in
+            let is_ref_definition = lhs_root = Some ref_dst &&
+              (match RvalueRd.get rv with RvalueRd.Ref _ -> true | _ -> false) in
+            let is_cast_definition = lhs_root = Some cast_dst &&
+              (match RvalueRd.get rv with RvalueRd.Cast _ -> true | _ -> false) in
+            if lhs_root = Some ref_dst && not is_ref_definition then incr ref_uses;
+            if lhs_root = Some cast_dst && not is_cast_definition then incr cast_uses;
+            let count = count_operand in
+            match RvalueRd.get rv with
+            | RvalueRd.Use op -> count ref_dst op; count cast_dst op
+            | RvalueRd.Repeat data ->
+                count ref_dst (RvalueRd.RepeatData.operand_get data);
+                count cast_dst (RvalueRd.RepeatData.operand_get data)
+            | RvalueRd.Ref data ->
+                count_place ref_dst (RefDataRd.place_get data);
+                count_place cast_dst (RefDataRd.place_get data)
+            | RvalueRd.RawPtr data ->
+                count_place ref_dst (RawPtrDataRd.place_get data);
+                count_place cast_dst (RawPtrDataRd.place_get data)
+            | RvalueRd.Cast data ->
+                count ref_dst (CastDataRd.operand_get data);
+                count cast_dst (CastDataRd.operand_get data)
+            | RvalueRd.BinaryOp data ->
+                let l = RvalueRd.BinaryOpData.operandl_get data
+                and r = RvalueRd.BinaryOpData.operandr_get data in
+                List.iter (count ref_dst) [l; r];
+                List.iter (count cast_dst) [l; r]
+            | RvalueRd.UnaryOp data ->
+                count ref_dst (RvalueRd.UnaryOpData.operand_get data);
+                count cast_dst (RvalueRd.UnaryOpData.operand_get data)
+            | RvalueRd.Aggregate data ->
+                List.iter (count ref_dst)
+                  (AggregateDataRd.operands_get_list data);
+                List.iter (count cast_dst)
+                  (AggregateDataRd.operands_get_list data)
+            | RvalueRd.Discriminant data ->
+                count_place ref_dst (DiscriminantDataRd.place_get data);
+                count_place cast_dst (DiscriminantDataRd.place_get data)
+            | RvalueRd.ThreadLocalRef -> ()) !assign_records;
+          List.iter (fun stmt ->
+            match StatementKindRd.get (StatementRd.kind_get stmt) with
+            | StatementKindRd.PlaceMention place ->
+                count_place ref_dst place;
+                count_place cast_dst place
+            | StatementKindRd.Assume operand ->
+                count_operand ref_dst operand;
+                count_operand cast_dst operand
+            | _ -> ())
+            (List.concat_map BasicBlockRd.statements_get_list
+              (basic_blocks_get_list body_cpn));
+          let method_calls = ref [] in
+          List.iter (fun block ->
+            match TerminatorKindRd.get
+                (TerminatorRd.kind_get (BasicBlockRd.terminator_get block)) with
+            | TerminatorKindRd.Call call ->
+                let method_name = match D.decode_operand
+                    (FnCallDataRd.func_get call) with
+                  | Constant {const = Val {ty = {kind = FnDef {id = {name}; _}}}} ->
+                      canonicalize_item_name name
+                  | _ -> "" in
+                if method_name = "std::slice::<impl [T]>::as_mut_ptr" then
+                  method_calls := (call, block) :: !method_calls
+            | _ -> ()) (basic_blocks_get_list body_cpn);
+          let call, _call_block = match !method_calls with
+            | [one] -> one
+            | [] -> refuse plan.r23_pre_marker_loc
+                "the marked source site has no slice::as_mut_ptr terminator"
+            | _ -> refuse plan.r23_pre_marker_loc
+                "the body has multiple slice::as_mut_ptr terminators"
+          in
+          let helper_body = match body_tr_defs_ctx.r23_checked_slice_helper with
+            | Some body -> body
+            | None -> refuse plan.r23_pre_marker_loc
+                "the exported unit has no unique checked r23 slice helper body"
+          in
+          let projection = match OptionRd.get
+              (FnCallDataRd.r23_slice_projection_get call) with
+            | OptionRd.Something ptr -> ptr
+            | _ -> refuse plan.r23_pre_marker_loc
+                "the selected std call has no actual callee MIR projection"
+          in
+          let checked_helper_name = r23_verify_checked_slice_helper
+            plan.r23_pre_marker_loc projection helper_body in
+          plan.r23_checked_helper_name <- Some checked_helper_name;
+          plan.r23_projection_approved <- true;
+          (match OptionRd.get (FnCallDataRd.target_get call) with
+           | OptionRd.Something _ -> ()
+           | _ -> refuse plan.r23_pre_marker_loc
+               "as_mut_ptr call has no original normal successor");
+          List.iter (fun block ->
+            let terminator = BasicBlockRd.terminator_get block in
+            match TerminatorKindRd.get (TerminatorRd.kind_get terminator) with
+            | TerminatorKindRd.Call data ->
+                count_operand ref_dst (FnCallDataRd.func_get data);
+                count_operand cast_dst (FnCallDataRd.func_get data);
+                List.iter (count_operand ref_dst)
+                  (FnCallDataRd.args_get_list data);
+                List.iter (count_operand cast_dst)
+                  (FnCallDataRd.args_get_list data)
+            | TerminatorKindRd.SwitchInt data ->
+                count_operand ref_dst (SwitchIntDataRd.discr_get data);
+                count_operand cast_dst (SwitchIntDataRd.discr_get data)
+            | TerminatorKindRd.Drop data ->
+                count_place ref_dst (DropDataRd.place_get data);
+                count_place cast_dst (DropDataRd.place_get data)
+            | TerminatorKindRd.Assert data ->
+                count_operand ref_dst (AssertDataRd.cond_get data);
+                count_operand cast_dst (AssertDataRd.cond_get data)
+            | _ -> ()) (basic_blocks_get_list body_cpn);
+          let call_args = FnCallDataRd.args_get_list call in
+          let receiver_id = match call_args with
+            | [receiver] -> operand_local receiver
+            | _ -> None in
+          if receiver_id <> Some cast_dst then
+            refuse plan.r23_pre_marker_loc
+              "as_mut_ptr receiver is not the exact Unsize result";
+          let destination_id = place_local (FnCallDataRd.destination_get call) in
+          if destination_id <> Some begin_id then
+            refuse plan.r23_pre_marker_loc
+              "as_mut_ptr destination is not the marked begin local";
+          if !ref_uses <> 1 || !cast_uses <> 1 then
+            refuse plan.r23_pre_marker_loc
+              "a reference temporary has an extra use or escapes the exact chain";
+          let* ref_span = translate_span_data
+            (SourceInfoRd.span_get (StatementRd.source_info_get ref_stmt)) in
+          let* cast_span = translate_span_data
+            (SourceInfoRd.span_get (StatementRd.source_info_get cast_stmt)) in
+          let* call_span = translate_span_data (FnCallDataRd.call_span_get call) in
+          let ((marker_file, marker_line, _), _) =
+            Ast.lexed_loc plan.r23_pre_marker_loc in
+          let ((post_file, post_line, _), _) =
+            Ast.lexed_loc plan.r23_post_marker_loc in
+          let in_marker_range loc =
+            let ((file, line, _), _) = Ast.lexed_loc loc in
+            file = marker_file && file = post_file &&
+            marker_line < line && line < post_line
+          in
+          if not (in_marker_range ref_span && in_marker_range cast_span &&
+                  in_marker_range call_span) then
+            refuse plan.r23_pre_marker_loc
+              "Ref, Unsize, and as_mut_ptr spans do not lie between the markers";
+          let source_point loc = fst (Ast.lexed_loc loc) in
+          let ref_file, ref_line, ref_col = source_point ref_span
+          and cast_file, cast_line, cast_col = source_point cast_span
+          and call_file, call_line, call_col = source_point call_span in
+          if ref_file <> cast_file || ref_file <> call_file ||
+             (ref_line, ref_col) > (cast_line, cast_col) ||
+             (cast_line, cast_col) > (call_line, call_col) then
+            refuse plan.r23_pre_marker_loc
+              "Ref, Unsize, and as_mut_ptr are not ordered at one original source site";
+          let _ = ref_data and _ = cast_data and _ = ref_dst in
+          plan.r23_ref_local <- Some ref_dst;
+          plan.r23_unsize_local <- Some cast_dst;
+          Ok (Some plan)
+    in
+    r23_source_array3_interp_active := r23_source_array_adapter <> None;
     let r9_return_marker_stmt = function
       | Ast.PureStmt (_, Ast.ExprStmt (Ast.CallExpr (_, "guard_current_return_recover", [], [], [], Ast.Static)))
       | Ast.ExprStmt (Ast.CallExpr (_, "guard_current_return_recover", [], [], [], Ast.Static)) -> true
@@ -6684,12 +7800,34 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
           List.map (fun g ->
             if Ast.stmt_loc g = l then fresh_first_callback_stmt stmt else g) ghost_stmts
     in
+    let ghost_stmts =
+      match r23_source_array_adapter with
+      | None -> ghost_stmts
+      | Some plan ->
+          let found_pre = ref 0 and found_post = ref 0 in
+          let stripped = List.map (fun stmt ->
+            if Ast.stmt_loc stmt = plan.r23_pre_marker_loc then (
+              incr found_pre;
+              plan.r23_pre_stmt)
+            else if Ast.stmt_loc stmt = plan.r23_post_marker_loc then (
+              incr found_post;
+              Ast.NoopStmt plan.r23_post_marker_loc)
+            else stmt) ghost_stmts in
+          if !found_pre <> 1 || !found_post <> 1 then
+            Ast.static_error plan.r23_pre_marker_loc
+              "R23 marker blocks did not map to unique translated source annotations"
+              None;
+          stripped
+    in
     let late_strict_scope_ends =
       match late_callback with
       | Some plan -> [(plan.late_scope_end_loc, plan.late_lft)]
       | None -> [] in
     let strict_lft_scope_ends =
-      strict_lft_scope_ends @ first_strict_scope_ends @ late_strict_scope_ends in
+      strict_lft_scope_ends @ first_strict_scope_ends @ late_strict_scope_ends @
+      (match r23_source_array_adapter with
+       | Some plan -> [(plan.r23_post_marker_loc, "'r23_borrow")]
+       | None -> []) in
     let source_pos l = fst (Ast.lexed_loc l) in
     let ghost_decl_blocks =
       match late_callback with
@@ -6714,6 +7852,34 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
           if !found <> 1 then
             Ast.static_error fn_sig_loc
               "Late callback recovery could not relocate exactly one let_lft declaration"
+              None;
+          blocks
+    in
+    let ghost_decl_blocks =
+      match r23_source_array_adapter with
+      | None -> ghost_decl_blocks
+      | Some plan ->
+          let found = ref 0 in
+          let blocks = List.map (function
+            | Ast.BlockStmt (_, decls, [], close, _)
+              when List.exists (function
+                | Ast.TypeWithTypeidDecl (_, name,
+                    Ast.CallExpr (_, "typeid_of_lft", [], [],
+                      [Ast.LitPat (Ast.Var (_, token))], Ast.Static))
+                  -> name = "'r23_borrow" && token = plan.r23_lifetime_token
+                | _ -> false) decls ->
+                  if source_pos plan.r23_pre_marker_loc >= source_pos plan.r23_post_marker_loc ||
+                     source_pos plan.r23_post_marker_loc >= source_pos close then
+                    Ast.static_error plan.r23_pre_marker_loc
+                      "R23 let_lft binding's enclosing function scope does not reach the post marker"
+                      None;
+                  incr found;
+                  Ast.BlockStmt
+                    (plan.r23_pre_marker_loc, decls, [], close, ref [])
+            | block -> block) ghost_decl_blocks in
+          if !found <> 1 then
+            Ast.static_error plan.r23_pre_marker_loc
+              "R23 source adapter could not relocate exactly one let_lft declaration"
               None;
           blocks
     in
@@ -6859,6 +8025,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
       let callback_scope_start = callback_scope_start
       let first_callback = first_callback
       let late_callback = late_callback
+      let r23_source_array_adapter = r23_source_array_adapter
       let r9_guard_return = r9_guard_return
       let r19_unwind_cleanup = r19_unwind_cleanup
     end) in
@@ -7545,8 +8712,56 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
               Ast.static_error fn_sig_loc
                 "mir_stack_addr appears in an unsupported ghost syntax position"
                 None;
+            let r23_scoped_local_ids =
+              match State.r23_source_array_adapter with
+              | None -> []
+              | Some plan ->
+                  (match plan.r23_ref_local, plan.r23_unsize_local with
+                   | Some ref_local, Some cast_local ->
+                       [ translate_local_decl_id_ ref_local;
+                         translate_local_decl_id_ cast_local ]
+                   | _ -> Ast.static_error plan.r23_pre_marker_loc
+                       "R23 selected temporary ids were not bound" None)
+            in
+            let all_body_local_decls = ret_place_decl :: local_decls in
+            let r23_scoped_decls =
+              match State.r23_source_array_adapter with
+              | None -> []
+              | Some plan ->
+                  let selected = List.filter (fun ({ Mir.id; _ } : Mir.local_decl) ->
+                    List.mem id r23_scoped_local_ids) all_body_local_decls in
+                  if List.length selected <> 2 then
+                    Ast.static_error plan.r23_pre_marker_loc
+                      "R23 selected reference temporaries are not unique body locals"
+                      None;
+                  List.map (fun ({ Mir.mutability = mutability; id;
+                                   ty = (lazy ty_info); loc = decl_loc }
+                                  : Mir.local_decl) ->
+                    let scoped_ty = match ty_info.vf_ty with
+                      | Ast.RustRefTypeExpr (at, _, Ast.Mutable, pointee) ->
+                          Ast.RustRefTypeExpr
+                            (at, Ast.IdentTypeExpr
+                               (at, None, "'r23_borrow"), Ast.Mutable, pointee)
+                      | _ -> Ast.static_error decl_loc
+                          "R23 scoped temporary is not a mutable reference type"
+                          None
+                    in
+                    Ast.DeclStmt
+                      (decl_loc,
+                       [ (decl_loc,
+                          Some (match mutability with
+                            | Mir.Mut -> scoped_ty
+                            | Mir.Not -> Ast.ConstTypeExpr (decl_loc, scoped_ty)),
+                          id, None, (ref false, ref None) ) ])) selected
+            in
+            (match State.r23_source_array_adapter with
+             | Some plan -> plan.r23_scoped_local_decls <- r23_scoped_decls
+             | None -> ());
             let vf_local_decls =
-              List.map (translate_to_vf_local_decl loc) (ret_place_decl :: local_decls)
+              all_body_local_decls
+              |> List.filter (fun ({ Mir.id; _ } : Mir.local_decl) ->
+                   not (List.mem id r23_scoped_local_ids))
+              |> List.map (translate_to_vf_local_decl loc)
             in
             let vf_local_decls =
               match late_callback with
@@ -8061,6 +9276,21 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                    "R19 cleanup marker did not follow insert_tail"
                    None
              | _ -> ());
+            (match State.r23_source_array_adapter with
+             | Some plan when not plan.r23_ref_seen ||
+                  not plan.r23_unsize_seen || not plan.r23_call_seen ->
+                 Ast.static_error plan.r23_pre_marker_loc
+                   "R23 source adapter was not consumed by exactly one Ref-Unsize-as_mut_ptr chain"
+                   None
+             | Some _ when !State.r23_adapter_post_bridge <> None ->
+                 Ast.static_error fn_sig_loc
+                   "R23 source adapter left an unconsumed slice-to-array borrow bridge"
+                   None
+             | Some plan when not plan.r23_scope_decls_inserted ->
+                 Ast.static_error plan.r23_pre_marker_loc
+                   "R23 scoped Ref/Unsize declarations were not placed inside the strict source interval"
+                   None
+             | _ -> ());
             (match State.r9_guard_return with
              | None -> ()
              | Some plan ->
@@ -8088,6 +9318,16 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                         (call_loc, "unwinding", [], [], [], Ast.Static))) ]
               | _ -> Ast.static_error fn_sig_loc "Callback cleanup marker did not match a call" None
             in
+            let vf_bblocks =
+              match State.r23_source_array_adapter with
+              | Some plan ->
+                  (match plan.r23_unwind_epilogue with
+                   | None -> Ast.static_error plan.r23_pre_marker_loc
+                       "R23 adapter did not preserve the original method unwind outcome"
+                       None
+                   | Some epilogue -> vf_bblocks @ epilogue)
+              | None -> vf_bblocks
+            in
             Ok
               (mk_fn_decl contract
                  (Some
@@ -8101,6 +9341,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
               let body_sig = mk_fn_decl contract_template None in
               Some (split_name, body_sig)
         in
+        r23_source_array3_interp_active := false;
         Ok
           ( body_sig_opt,
             (split_name, body),
@@ -11127,8 +12368,17 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
             "Multiple generated Drop glue bodies in one exported unit" None
       in
       let body_tr_defs_ctx =
+        let r23_checked_slice_helpers = List.filter (fun body ->
+          let name = TrName.translate_def_path (BodyRd.def_path_get body) in
+          name = "r23_checked_slice_as_mut_ptr" ||
+          String.ends_with ~suffix:"::r23_checked_slice_as_mut_ptr" name)
+          bodies_cpn in
+        let r23_checked_slice_helper = match r23_checked_slice_helpers with
+          | [helper] -> Some helper
+          | _ -> None in
         { selected_drops; generated_glue; adt_defs; ghost_decl_map;
-          directives = vf_mir_translator_directives; fn_specializer }
+          directives = vf_mir_translator_directives; fn_specializer;
+          r23_checked_slice_helper }
       in
       let* bodies_tr_res =
         Rocq_writer.rocq_print Args.rocq_writer "Definition bodies := ";

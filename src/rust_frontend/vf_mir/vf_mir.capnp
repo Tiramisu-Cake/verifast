@@ -797,6 +797,25 @@ struct TerminatorKind {
     }
 
     struct FnCallData {
+        struct R23SliceProjection {
+            struct GenericBinding {
+                id @0: Text;
+                value @1: GenericArg;
+            }
+            calleeName @0: Text;
+            calleeDefPathHash @1: Text;
+            mirPhase @2: Text;
+            mirDebugHash @3: Text;
+            genericBindings @4: List(GenericBinding);
+            inputs @5: List(Ty);
+            output @6: Ty;
+            localDecls @7: List(LocalDecl);
+            basicBlocks @8: List(BasicBlock);
+            blockCount @9: UInt32;
+            statementCount @10: UInt32;
+            unsupportedReason @11: Text;
+            unavailableReason @12: Text;
+        }
         func @0: Operand;
         args @1: List(Operand);
         destination @2: Place;
@@ -805,6 +824,7 @@ struct TerminatorKind {
         # The span of the call, without the dot and receiver e.g. `foo(a, b)` in `x.foo(a, b)`
         callSpan @3: SpanData;
         ghostGenericArgList @4: Option(Annotation);
+        r23SliceProjection @7: Option(R23SliceProjection);
     }
 
     struct DropData {

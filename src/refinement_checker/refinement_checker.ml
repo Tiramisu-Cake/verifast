@@ -568,7 +568,8 @@ let fns_to_be_inlined: (string * body) list =
               target=Something {index=Stdint.Uint32.of_int 1};
               unwind_action=Cleanup {index=Stdint.Uint32.of_int 3};
               call_span=span;
-              ghost_generic_arg_list=Nothing
+              ghost_generic_arg_list=Nothing;
+              r23_slice_projection=Nothing
             };
             source_info={span}
           };
@@ -927,7 +928,8 @@ let fns_to_be_inlined: (string * body) list =
             target=Something {index=Stdint.Uint32.of_int 4};
             unwind_action=Cleanup {index=Stdint.Uint32.of_int 5};
             call_span=span;
-            ghost_generic_arg_list=Nothing
+            ghost_generic_arg_list=Nothing;
+            r23_slice_projection=Nothing
           };
           source_info={span}
         };
@@ -1171,7 +1173,8 @@ let fns_to_be_inlined: (string * body) list =
             target=Something {index=Stdint.Uint32.of_int 4};
             unwind_action=Cleanup {index=Stdint.Uint32.of_int 5};
             call_span=span;
-            ghost_generic_arg_list=Nothing
+            ghost_generic_arg_list=Nothing;
+            r23_slice_projection=Nothing
           };
           source_info={span}
         };
@@ -1395,7 +1398,8 @@ let fns_to_be_inlined: (string * body) list =
             target=Something {index=Stdint.Uint32.of_int 4};
             unwind_action=Cleanup {index=Stdint.Uint32.of_int 5};
             call_span=span;
-            ghost_generic_arg_list=Nothing
+            ghost_generic_arg_list=Nothing;
+            r23_slice_projection=Nothing
           };
           source_info={span}
         };
@@ -1564,7 +1568,8 @@ let fns_to_be_inlined: (string * body) list =
             target=Something {index=Stdint.Uint32.of_int 6};
             unwind_action=Cleanup {index=Stdint.Uint32.of_int 5};
             call_span=span;
-            ghost_generic_arg_list=Nothing
+            ghost_generic_arg_list=Nothing;
+            r23_slice_projection=Nothing
           };
           source_info={span}
         };
