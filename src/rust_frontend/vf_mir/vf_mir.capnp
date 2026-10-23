@@ -906,8 +906,10 @@ struct Contract {
     span @1: SpanData;
 }
 
-# Diagnostic-only borrowck consumer data. Facts use identifiers and locations
-# from the capture MIR, whose mapping to the exported MIR is unestablished.
+# Diagnostic-only borrowck consumer data. Nested rows are scoped to this
+# capture body's path hash, debug-MIR hash, and phase. Any issued-loan/refsite
+# join is within that capture MIR only; mapping to the exported MIR stays
+# unestablished.
 struct OwnedNllCapture {
     bodyDefPathHash @0: Text;
     bodyId @1: Text;
@@ -924,6 +926,49 @@ struct OwnedNllCapture {
     emittedMirPhase @12: Text;
     mappingStatus @13: Text;
     originLiveOnEntryAvailable @14: Bool;
+    refSites @15: List(NllRefSite);
+    issuedLoans @16: List(NllIssuedLoan);
+}
+
+struct NllRefSite {
+    siteId @0: UInt32;
+    basicBlock @1: UInt32;
+    statementIndex @2: UInt64;
+    startPointIndex @3: UInt64;
+    midPointIndex @4: UInt64;
+    sourceRegion @5: Text;
+    regionVidAvailable @6: Bool;
+    regionVid @7: UInt32;
+    borrowKind @8: Text;
+    borrowedPlace @9: Text;
+    destinationPlace @10: Text;
+    borrowedType @11: Text;
+    destinationType @12: Text;
+    sourceSpan @13: Text;
+    joinStatus @14: Text;
+    matchedLoanIdAvailable @15: Bool;
+    matchedLoanId @16: UInt32;
+    pointIndicesAvailable @17: Bool;
+}
+
+# A typed row from PoloniusInputFacts.loan_issued_at, joined only to a unique
+# same-stage RefSite after location, region, and MIR shape checks.
+struct NllIssuedLoan {
+    loanId @0: UInt32;
+    pointIndex @1: UInt64;
+    pointKind @2: Text;
+    basicBlock @3: UInt32;
+    statementIndex @4: UInt64;
+    locationAvailable @5: Bool;
+    regionVidAvailable @6: Bool;
+    regionVid @7: UInt32;
+    borrowKind @8: Text;
+    borrowedPlace @9: Text;
+    destinationPlace @10: Text;
+    joinStatus @11: Text;
+    matchedRefSiteIdAvailable @12: Bool;
+    matchedRefSiteId @13: UInt32;
+    loanIdAvailable @14: Bool;
 }
 
 struct Body {

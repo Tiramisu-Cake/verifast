@@ -305,9 +305,47 @@ struct OwnedNllCapture {
     origin_live_on_entry_available: bool,
     subset_base: Vec<String>,
     loan_killed_at: Vec<String>,
+    ref_sites: Vec<OwnedNllRefSite>,
+    issued_loans: Vec<OwnedNllIssuedLoan>,
     diagnostic: String,
     fingerprint: u64,
     conflicting: bool,
+}
+
+#[derive(Clone, Default, PartialEq, Eq, Hash)]
+struct OwnedNllRefSite {
+    site_id: u32,
+    basic_block: u32,
+    statement_index: u64,
+    start_point_index: u64,
+    mid_point_index: u64,
+    point_indices_available: bool,
+    source_region: String,
+    region_vid: Option<u32>,
+    borrow_kind: String,
+    borrowed_place: String,
+    destination_place: String,
+    borrowed_type: String,
+    destination_type: String,
+    source_span: String,
+    join_status: String,
+    matched_loan_id: Option<u32>,
+}
+
+#[derive(Clone, Default, PartialEq, Eq, Hash)]
+struct OwnedNllIssuedLoan {
+    loan_id: u32,
+    point_index: u64,
+    point_kind: String,
+    basic_block: u32,
+    statement_index: u64,
+    location_available: bool,
+    region_vid: Option<u32>,
+    borrow_kind: String,
+    borrowed_place: String,
+    destination_place: String,
+    join_status: String,
+    matched_ref_site_id: Option<u32>,
 }
 
 static OWNED_NLL_CAPTURES: std::sync::OnceLock<std::sync::Mutex<HashMap<LocalDefId, OwnedNllCapture>>> =
@@ -348,6 +386,8 @@ fn owned_nll_capture_fingerprint(capture: &OwnedNllCapture) -> u64 {
     capture.loan_issued_at.hash(&mut hasher);
     capture.subset_base.hash(&mut hasher);
     capture.loan_killed_at.hash(&mut hasher);
+    capture.ref_sites.hash(&mut hasher);
+    capture.issued_loans.hash(&mut hasher);
     capture.diagnostic.hash(&mut hasher);
     hasher.finish()
 }
@@ -362,6 +402,15 @@ fn capture_owned_nll_facts<'tcx>(
 ) -> rustc_middle::queries::mir_borrowck::ProvidedValue<'tcx> {
     use rustc_borrowck::consumers::{self, ConsumerOptions};
     use rustc_index::Idx;
+    use rustc_middle::mir::HasLocalDecls;
+
+    struct RefCandidate<'tcx> {
+        location: mir::Location,
+        region_vid: Option<u32>,
+        borrow_kind: mir::BorrowKind,
+        borrowed_place: mir::Place<'tcx>,
+        destination_place: mir::Place<'tcx>,
+    }
 
     let bodies = consumers::get_bodies_with_borrowck_facts(
         tcx,
@@ -378,6 +427,55 @@ fn capture_owned_nll_facts<'tcx>(
             origin_live_on_entry_available: false,
             ..OwnedNllCapture::default()
         };
+        let mut ref_candidates = Vec::new();
+        for (basic_block, block_data) in facts_body.body.basic_blocks.iter_enumerated() {
+            for (statement_index, statement) in block_data.statements.iter().enumerate() {
+                let mir::StatementKind::Assign(assign) = &statement.kind else { continue };
+                let (destination_place, rvalue) = &**assign;
+                let mir::Rvalue::Ref(region, borrow_kind, borrowed_place) = rvalue else { continue };
+                let location = mir::Location { block: basic_block, statement_index };
+                let region_vid = match region.kind() {
+                    ty::RegionKind::ReVar(region_vid) => Some(region_vid.as_u32()),
+                    _ => None,
+                };
+                let site_id: u32 = capture.ref_sites.len().try_into().unwrap_or(u32::MAX);
+                let point_indices = facts_body.location_table.as_ref().map(|table| {
+                    (
+                        table.start_index(location).index().try_into().unwrap_or(u64::MAX),
+                        table.mid_index(location).index().try_into().unwrap_or(u64::MAX),
+                    )
+                });
+                let (borrowed_type, destination_type) = (
+                    borrowed_place.ty(&facts_body.body.local_decls, tcx).ty,
+                    destination_place.ty(&facts_body.body.local_decls, tcx).ty,
+                );
+                capture.ref_sites.push(OwnedNllRefSite {
+                    site_id,
+                    basic_block: basic_block.index().try_into().unwrap_or(u32::MAX),
+                    statement_index: statement_index.try_into().unwrap_or(u64::MAX),
+                    start_point_index: point_indices.map(|points| points.0).unwrap_or(u64::MAX),
+                    mid_point_index: point_indices.map(|points| points.1).unwrap_or(u64::MAX),
+                    point_indices_available: point_indices.is_some(),
+                    source_region: format!("{:?}", region),
+                    region_vid,
+                    borrow_kind: format!("{:?}", borrow_kind),
+                    borrowed_place: format!("{borrowed_place:?}"),
+                    destination_place: format!("{destination_place:?}"),
+                    borrowed_type: format!("{borrowed_type:?}"),
+                    destination_type: format!("{destination_type:?}"),
+                    source_span: format!("{:?}", statement.source_info.span),
+                    join_status: "UNESTABLISHED".to_owned(),
+                    matched_loan_id: None,
+                });
+                ref_candidates.push(RefCandidate {
+                    location,
+                    region_vid,
+                    borrow_kind: *borrow_kind,
+                    borrowed_place: *borrowed_place,
+                    destination_place: *destination_place,
+                });
+            }
+        }
         if let (Some(facts), Some(locations)) =
             (facts_body.input_facts.as_deref(), facts_body.location_table.as_ref())
         {
@@ -388,9 +486,117 @@ fn capture_owned_nll_facts<'tcx>(
             capture.loan_issued_at = facts.loan_issued_at.iter().map(|row| format!("{row:?}")).collect();
             capture.subset_base = facts.subset_base.iter().map(|row| format!("{row:?}")).collect();
             capture.loan_killed_at = facts.loan_killed_at.iter().map(|row| format!("{row:?}")).collect();
+            let point_count = locations.all_points().count();
+            let mut issue_candidates = Vec::new();
+            for (loan, point) in &facts.loan_issued_at {
+                let loan_index = loan.index();
+                let point_index = point.index();
+                let loan_id = u32::try_from(loan_index).unwrap_or(u32::MAX);
+                let mut issued = OwnedNllIssuedLoan {
+                    loan_id,
+                    point_index: point_index.try_into().unwrap_or(u64::MAX),
+                    loan_id_available: loan_index <= u32::MAX as usize,
+                    join_status: if loan_index >= facts_body.borrow_set.len() {
+                        "LOAN_INDEX_OUT_OF_RANGE".to_owned()
+                    } else if point_index >= point_count {
+                        "POINT_INDEX_OUT_OF_RANGE".to_owned()
+                    } else {
+                        "UNESTABLISHED".to_owned()
+                    },
+                    ..OwnedNllIssuedLoan::default()
+                };
+                if loan_index >= facts_body.borrow_set.len() || point_index >= point_count {
+                    capture.issued_loans.push(issued);
+                    issue_candidates.push(None);
+                    continue;
+                }
+                let rich_location = locations.to_rich_location(*point);
+                let (point_kind, point_location) = match rich_location {
+                    rustc_borrowck::consumers::RichLocation::Start(location) => ("Start", location),
+                    rustc_borrowck::consumers::RichLocation::Mid(location) => ("Mid", location),
+                };
+                issued.point_kind = point_kind.to_owned();
+                issued.basic_block = point_location.block.index().try_into().unwrap_or(u32::MAX);
+                issued.statement_index = point_location.statement_index.try_into().unwrap_or(u64::MAX);
+                issued.location_available = true;
+                let borrow_data = &facts_body.borrow_set[*loan];
+                let loan_region_vid = borrow_data.region().as_u32();
+                issued.region_vid = Some(loan_region_vid);
+                issued.borrow_kind = format!("{:?}", borrow_data.kind());
+                issued.borrowed_place = format!("{:?}", borrow_data.borrowed_place());
+                issued.destination_place = format!("{:?}", borrow_data.assigned_place());
+
+                let mut same_location = Vec::new();
+                let mut same_region = Vec::new();
+                let mut exact_shape = Vec::new();
+                if point_kind == "Mid" && borrow_data.reserve_location() == point_location {
+                    for (site_index, candidate) in ref_candidates.iter().enumerate() {
+                        if candidate.location == point_location {
+                            same_location.push(site_index);
+                            if candidate.region_vid == Some(loan_region_vid) {
+                                same_region.push(site_index);
+                                if candidate.borrow_kind == borrow_data.kind()
+                                    && candidate.borrowed_place == borrow_data.borrowed_place()
+                                    && candidate.destination_place == borrow_data.assigned_place()
+                                {
+                                    exact_shape.push(site_index);
+                                }
+                            }
+                        }
+                    }
+                }
+                if exact_shape.len() == 1 {
+                    issue_candidates.push(Some(exact_shape[0]));
+                } else {
+                    issue_candidates.push(None);
+                }
+                issued.join_status = if point_kind != "Mid" {
+                    "ISSUE_POINT_NOT_MID".to_owned()
+                } else if borrow_data.reserve_location() != point_location {
+                    "BORROW_RESERVATION_LOCATION_MISMATCH".to_owned()
+                } else if same_location.is_empty() {
+                    "NO_REF_SITE_AT_CAPTURE_LOCATION".to_owned()
+                } else if same_region.is_empty() {
+                    "REGION_MISMATCH_OR_UNAVAILABLE".to_owned()
+                } else if exact_shape.is_empty() {
+                    "REF_SITE_SHAPE_MISMATCH".to_owned()
+                } else if exact_shape.len() > 1 {
+                    "AMBIGUOUS_REF_SITE".to_owned()
+                } else {
+                    "CANDIDATE_MATCH".to_owned()
+                };
+                capture.issued_loans.push(issued);
+            }
+            let mut matches_per_site = vec![0usize; capture.ref_sites.len()];
+            for site_index in issue_candidates.iter().flatten() {
+                matches_per_site[*site_index] += 1;
+            }
+            for (loan_index, site_index) in issue_candidates.into_iter().enumerate() {
+                if let Some(site_index) = site_index {
+                    if matches_per_site[site_index] == 1 {
+                        let loan_id = capture.issued_loans[loan_index].loan_id;
+                        capture.issued_loans[loan_index].join_status = "MATCHED_CAPTURE_LOCATION_REGION_AND_SHAPE".to_owned();
+                        capture.issued_loans[loan_index].matched_ref_site_id = Some(capture.ref_sites[site_index].site_id);
+                        capture.ref_sites[site_index].join_status = "MATCHED_CAPTURE_LOCATION_REGION_AND_SHAPE".to_owned();
+                        capture.ref_sites[site_index].matched_loan_id = Some(loan_id);
+                    } else {
+                        capture.issued_loans[loan_index].join_status = "AMBIGUOUS_MULTIPLE_LOANS_FOR_REF_SITE".to_owned();
+                    }
+                }
+            }
+            for (site_index, site) in capture.ref_sites.iter_mut().enumerate() {
+                if matches_per_site[site_index] > 1 {
+                    site.join_status = "AMBIGUOUS_MULTIPLE_LOANS_FOR_REF_SITE".to_owned();
+                } else if site.join_status == "UNESTABLISHED" {
+                    site.join_status = "NO_MATCHING_ISSUED_LOAN".to_owned();
+                }
+            }
             capture.diagnostic = "origin_live_on_entry unavailable: derived output relation, not present in PoloniusInputFacts".to_owned();
         } else {
             capture.diagnostic = "Polonius input facts or location table unavailable; origin_live_on_entry unavailable from PoloniusInputFacts".to_owned();
+            for site in &mut capture.ref_sites {
+                site.join_status = "INPUT_FACTS_OR_LOCATION_TABLE_UNAVAILABLE".to_owned();
+            }
         }
         capture.fingerprint = owned_nll_capture_fingerprint(&capture);
         {
@@ -1825,6 +2031,43 @@ use rustc_span::RemapPathScopeComponents;
                     nll_cpn.fill_origin_live_on_entry(&capture.origin_live_on_entry);
                     nll_cpn.fill_subset_base(&capture.subset_base);
                     nll_cpn.fill_loan_killed_at(&capture.loan_killed_at);
+                    nll_cpn.fill_ref_sites(&capture.ref_sites, |mut site_cpn, site| {
+                        site_cpn.set_site_id(site.site_id);
+                        site_cpn.set_basic_block(site.basic_block);
+                        site_cpn.set_statement_index(site.statement_index);
+                        site_cpn.set_start_point_index(site.start_point_index);
+                        site_cpn.set_mid_point_index(site.mid_point_index);
+                        site_cpn.set_point_indices_available(site.point_indices_available);
+                        site_cpn.set_source_region(&site.source_region);
+                        site_cpn.set_region_vid_available(site.region_vid.is_some());
+                        site_cpn.set_region_vid(site.region_vid.unwrap_or_default());
+                        site_cpn.set_borrow_kind(&site.borrow_kind);
+                        site_cpn.set_borrowed_place(&site.borrowed_place);
+                        site_cpn.set_destination_place(&site.destination_place);
+                        site_cpn.set_borrowed_type(&site.borrowed_type);
+                        site_cpn.set_destination_type(&site.destination_type);
+                        site_cpn.set_source_span(&site.source_span);
+                        site_cpn.set_join_status(&site.join_status);
+                        site_cpn.set_matched_loan_id_available(site.matched_loan_id.is_some());
+                        site_cpn.set_matched_loan_id(site.matched_loan_id.unwrap_or_default());
+                    });
+                    nll_cpn.fill_issued_loans(&capture.issued_loans, |mut loan_cpn, loan| {
+                        loan_cpn.set_loan_id(loan.loan_id);
+                        loan_cpn.set_loan_id_available(loan.loan_id_available);
+                        loan_cpn.set_point_index(loan.point_index);
+                        loan_cpn.set_point_kind(&loan.point_kind);
+                        loan_cpn.set_basic_block(loan.basic_block);
+                        loan_cpn.set_statement_index(loan.statement_index);
+                        loan_cpn.set_location_available(loan.location_available);
+                        loan_cpn.set_region_vid_available(loan.region_vid.is_some());
+                        loan_cpn.set_region_vid(loan.region_vid.unwrap_or_default());
+                        loan_cpn.set_borrow_kind(&loan.borrow_kind);
+                        loan_cpn.set_borrowed_place(&loan.borrowed_place);
+                        loan_cpn.set_destination_place(&loan.destination_place);
+                        loan_cpn.set_join_status(&loan.join_status);
+                        loan_cpn.set_matched_ref_site_id_available(loan.matched_ref_site_id.is_some());
+                        loan_cpn.set_matched_ref_site_id(loan.matched_ref_site_id.unwrap_or_default());
+                    });
                 }
                 nll_cpn.set_origin_live_on_entry_available(capture.origin_live_on_entry_available);
                 let emitted_hash = Self::captured_mir_hash(body);
