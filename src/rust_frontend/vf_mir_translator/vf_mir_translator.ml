@@ -6631,7 +6631,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                 then Ok false
                 else
                   let* len_expr = translate_ty_const
-                    (ArrayTyRd.size_get array_ty) loc in
+                    (D.decode_ty_const (ArrayTyRd.size_get array_ty)) loc in
                   (match len_expr with
                    | Ast.CastExpr (_, _, Ast.IntLit (_, n, _, _, _))
                    | Ast.IntLit (_, n, _, _, _) ->
