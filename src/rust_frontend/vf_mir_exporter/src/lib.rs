@@ -3351,7 +3351,7 @@ use rustc_span::RemapPathScopeComponents;
 
             let old_mode = std::mem::replace(&mut enc_ctx.mode, EncKind::Body(body));
             let old_region_scope_id = enc_ctx.region_scope_id.replace(format!(
-                "{}:{}",
+                "{:?}:{}",
                 tcx.def_path_hash(*def_id),
                 Self::captured_mir_hash(body),
             ));

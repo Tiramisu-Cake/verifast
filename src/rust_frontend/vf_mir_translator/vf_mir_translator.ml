@@ -6358,7 +6358,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
       let unpure = function Ast.PureStmt (_, inner) -> inner | stmt -> stmt in
       let is_call = function
         | Ast.ExprStmt (Ast.CallExpr (_, found, _, _, _, Ast.Static))
-        | Ast.CallExpr (_, found, _, _, _, Ast.Static) -> found = name
+          -> found = name
         | _ -> false in
       match unpure stmt with
       | Ast.BlockStmt (_, _, head :: _, _, _) -> is_call (unpure head)
