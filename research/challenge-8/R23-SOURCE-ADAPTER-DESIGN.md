@@ -133,3 +133,17 @@ erased, the explicit source scope binds only this unique checked interval; it
 does not equate the erased region with the logical name. These remain
 conditions, not proof results. The main agent owns the canonical-original-
 runtime diagnostic and checked proof annotations.
+
+## Checked helper lifetime binding correction
+
+The paired helper keeps its existing `fn<'a>(s: &'a mut [u64])` signature.
+The exporter populates `Body.generics` from `tcx.generics_of(def_id).own_params`,
+which describes early-bound item parameters; this input-only `'a` is
+late-bound and therefore is not expected in that list. Helper admission must
+require `Body.generics` to be empty and validate the exact source-declared
+HIR generic list as one plain lifetime named `'a`. The check rejects other HIR
+parameters, early-bound parameters, or missing/renamed source lifetimes; it
+does not infer lifetime identity from MIR regions or change the checked
+borrow/return contract. The helper's full typed signature and cast-body
+comparison remain mandatory. This is a binding check for the existing
+source declaration, not a new lifetime or authority premise.

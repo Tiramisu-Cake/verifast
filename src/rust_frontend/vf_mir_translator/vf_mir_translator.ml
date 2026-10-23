@@ -2177,13 +2177,24 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
        Capnp.Array.is_empty
          (ContractRd.annotations_get (BodyRd.contract_get helper_body)) then
       fail "checked helper identity, captured MIR binding, or proof contract is missing";
-    (match BodyRd.generics_get_list helper_body with
-     | [param]
-       when GenericParamDefRd.name_get param = "a" &&
-            GenericParamDefKindRd.get
-              (GenericParamDefRd.kind_get param) =
-                GenericParamDefKindRd.Lifetime -> ()
-     | _ -> fail "checked helper signature is not exactly generic over one lifetime");
+    if BodyRd.generics_get_list helper_body <> [] then
+      fail "checked helper has early-bound generics; expected only its source lifetime";
+    let helper_hir_params = HirGenericsRd.params_get_list
+      (BodyRd.hir_generics_get helper_body) in
+    (match helper_hir_params with
+     | [param] ->
+         let name = match HirGenericParamNameRd.get
+             (HirGenericParamRd.name_get param) with
+           | HirGenericParamNameRd.Plain ident ->
+               SymbolRd.name_get (IdentRd.name_get ident)
+           | HirGenericParamNameRd.Fresh _
+           | HirGenericParamNameRd.Undefined _ -> "" in
+         let kind = HirGenericParamKindRd.get
+           (HirGenericParamRd.kind_get param) in
+         if name <> "'a" || kind <> HirGenericParamKindRd.Lifetime then
+           fail "checked helper source HIR signature is not exactly generic over lifetime 'a"
+     | _ ->
+         fail "checked helper source HIR signature must declare only lifetime 'a");
     let helper_projection = r23_pure_projection loc ~generic_bindings:[]
       ~inputs:(BodyRd.inputs_get_list helper_body)
       ~output:(BodyRd.output_get helper_body)
