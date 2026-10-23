@@ -1971,6 +1971,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
     r23_projection_input : string;
     r23_projection_output : string;
     r23_projection_steps : string list;
+    r23_projection_trace : string list;
     r23_projection_local_count : int;
     r23_projection_local_mutabilities : string list;
     r23_projection_block_count : int;
@@ -2035,6 +2036,12 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
     let local_ty id = match List.assoc_opt id local_types with
       | Some ty -> ty
       | None -> fail "projection operand or destination has no local declaration" in
+    let local_index id =
+      let rec find index = function
+        | [] -> fail "projection statement refers to an undeclared local"
+        | (candidate, _) :: rest ->
+            if candidate = id then index else find (index + 1) rest in
+      find 0 local_types in
     let input_local, output_local = match local_decls with
       | ret :: arg :: _ ->
           let ret_id = LocalDeclIdRd.name_get (LocalDeclRd.id_get ret)
@@ -2060,8 +2067,54 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
     let provenance = ref [input_local] in
     let assigned = ref [] in
     let step_edges = ref [] in
-    let steps = List.map (fun stmt ->
+    let statements = BasicBlockRd.statements_get_list block in
+    let storage_locals = List.fold_left (fun locals stmt ->
+      let id = match StatementKindRd.get (StatementRd.kind_get stmt) with
+        | StatementKindRd.StorageLive local
+        | StatementKindRd.StorageDead local ->
+            Some (LocalDeclIdRd.name_get local)
+        | _ -> None in
+      match id with
+      | Some id when not (List.mem id locals) -> id :: locals
+      | _ -> locals) [] statements in
+    List.iter (fun id ->
+      ignore (local_index id);
+      if id = input_local || id = output_local then
+        fail "storage markers target the receiver or return local";
+      if not (String.starts_with ~prefix:"raw-"
+          (r23_projection_type_key loc generic_bindings (local_ty id))) then
+        fail "storage markers target a non-pointer temporary") storage_locals;
+    let storage_states = ref (List.map (fun id -> id, false) storage_locals) in
+    let storage_started = ref [] in
+    let storage_ended = ref [] in
+    let steps = ref [] in
+    (* Locals with no storage markers are live for the whole body. For marked
+       temporaries, accept only one explicit, balanced Live/Dead pair. *)
+    let local_is_live id = match List.assoc_opt id !storage_states with
+      | Some live -> live
+      | None -> true in
+    let set_storage_live id live =
+      storage_states := List.map (fun (candidate, old_live) ->
+        candidate, if candidate = id then live else old_live) !storage_states in
+    let trace = List.map (fun stmt ->
       match StatementKindRd.get (StatementRd.kind_get stmt) with
+      | StatementKindRd.StorageLive local ->
+          let id = LocalDeclIdRd.name_get local in
+          if List.mem id !storage_started || local_is_live id then
+            fail "storage local has a duplicate or overlapping Live event";
+          storage_started := id :: !storage_started;
+          set_storage_live id true;
+          "storage-live:" ^ string_of_int (local_index id)
+      | StatementKindRd.StorageDead local ->
+          let id = LocalDeclIdRd.name_get local in
+          if not (List.mem id !storage_started) ||
+             List.mem id !storage_ended || not (local_is_live id) then
+            fail "storage local has an unmatched or overlapping Dead event";
+          if not (List.mem id !provenance) then
+            fail "storage local becomes dead before receiving a projection value";
+          storage_ended := id :: !storage_ended;
+          set_storage_live id false;
+          "storage-dead:" ^ string_of_int (local_index id)
       | StatementKindRd.Assign data ->
           let lhs = AssignDataRd.lhs_place_get data in
           if PlaceRd.projection_get_list lhs <> [] then
@@ -2075,9 +2128,10 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                    when PlaceRd.projection_get_list place = [] ->
                      LocalDeclIdRd.name_get (PlaceRd.local_get place)
                  | _ -> fail "projection cast source is not a bare local" in
-               if not (List.mem src !provenance) ||
+               if not (List.mem src !provenance) || not (local_is_live src) ||
+                  not (local_is_live dst) ||
                   List.mem dst !assigned || dst = input_local then
-                 fail "projection result is not a unique dataflow from the receiver";
+                 fail "projection cast uses a dead local or is not a unique dataflow from the receiver";
                let source_type = match OptionRd.get
                    (CastDataRd.source_ty_get cast_data) with
                  | OptionRd.Something ptr -> VfMirRd.of_pointer ptr
@@ -2106,10 +2160,19 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                provenance := dst :: !provenance;
                assigned := dst :: !assigned;
                step_edges := !step_edges @ [(src, dst)];
-               source_key ^ "->" ^ target_key ^ ":" ^ cast_kind
+               let edge = source_key ^ "->" ^ target_key ^ ":" ^ cast_kind in
+               steps := edge :: !steps;
+               "cast:" ^ string_of_int (local_index src) ^ ":" ^
+               string_of_int (local_index dst) ^ ":" ^ edge
            | _ -> fail "projection contains a non-cast rvalue")
       | _ -> fail "projection contains a non-assignment statement")
-      (BasicBlockRd.statements_get_list block) in
+      statements in
+    let steps = List.rev !steps in
+    if List.sort_uniq String.compare !storage_started <>
+         List.sort_uniq String.compare storage_locals ||
+       List.sort_uniq String.compare !storage_ended <>
+         List.sort_uniq String.compare storage_locals then
+      fail "storage marker locals do not have one complete Live/Dead pair";
     if steps = [] || List.hd !assigned <> output_local ||
        not (List.mem output_local !provenance) then
       fail "returned raw pointer is not the final cast result";
@@ -2126,6 +2189,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
     { r23_projection_input = input_key;
       r23_projection_output = output_key;
       r23_projection_steps = steps;
+      r23_projection_trace = trace;
       r23_projection_local_count = List.length local_decls;
       r23_projection_local_mutabilities = local_mutabilities;
       r23_projection_block_count = block_count;

@@ -3432,8 +3432,19 @@ use rustc_span::RemapPathScopeComponents;
                 return Some("callee MIR terminator is not Return");
             }
             for statement in &block.statements {
+                if matches!(
+                    &statement.kind,
+                    mir::StatementKind::StorageLive(_) | mir::StatementKind::StorageDead(_)
+                ) {
+                    continue;
+                }
                 let mir::StatementKind::Assign((lhs, rvalue)) = &statement.kind else {
-                    return Some("callee MIR contains a non-assignment statement");
+                    return Some(match &statement.kind {
+                        mir::StatementKind::Nop => "callee MIR contains a Nop statement",
+                        mir::StatementKind::PlaceMention(..) => "callee MIR contains a PlaceMention statement",
+                        mir::StatementKind::FakeRead(..) => "callee MIR contains a FakeRead statement",
+                        _ => "callee MIR contains an unsupported non-assignment statement",
+                    });
                 };
                 if !lhs.projection.is_empty() {
                     return Some("callee MIR assignment does not target a bare local");
