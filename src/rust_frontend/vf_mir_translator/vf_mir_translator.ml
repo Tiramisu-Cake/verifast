@@ -3624,11 +3624,11 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                                              (loc, Ast.Int
                                                (Ast.Unsigned, Ast.FixedWidthRank 3))),
                                          Ast.Var (loc, "r23_array_p")))], Ast.Static)) in
-                                   plan.r23_unwind_epilogue <- Some
+                                   plan.r23_unwind_epilogue <- Some (
                                      [Ast.Assert (loc, Ast.False loc);
                                       Ast.LabelStmt (loc, plan.r23_unwind_label);
                                       fresh_first_callback_stmt plan.r23_post_stmt;
-                                      array_to_array] @ unwind_stmts;
+                                      array_to_array] @ unwind_stmts);
                                    [recover; Ast.GotoStmt (loc, plan.r23_unwind_label)]
                                | None ->
                               (match late_callback_cleanup,
