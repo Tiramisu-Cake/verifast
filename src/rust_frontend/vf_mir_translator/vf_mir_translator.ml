@@ -2620,7 +2620,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
             substs_cpn
             @ List.init fn_def_ty_cpn.late_bound_generic_param_count
                 (fun i : D.generic_arg ->
-                  { kind = Lifetime { id = "'erased" } })
+                  { kind = Lifetime { id = "'erased"; identity = Nothing } })
           in
           let fn_name, substs_cpn =
             Args.body_tr_defs_ctx.fn_specializer fn_name substs_cpn
@@ -10811,7 +10811,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
     | Ast.IdentTypeExpr (_, None, x) ->
       if List.mem_assoc x tparams then
         if String.starts_with ~prefix:"'" x then
-          { kind = Lifetime { id = x } }
+          { kind = Lifetime { id = x; identity = Nothing } }
         else
           { kind = Type {kind=Param x} }
       else
@@ -10887,7 +10887,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                 tparams
                 |> List.map @@ fun (x, _): D.generic_arg ->
                     if String.starts_with ~prefix:"'" x then
-                      { kind = Lifetime { id = List.assoc x env.lifetime_env } }
+                      { kind = Lifetime { id = List.assoc x env.lifetime_env; identity = Nothing } }
                     else
                       { kind = Type (List.assoc x env.type_env) }
               in
