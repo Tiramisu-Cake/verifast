@@ -3324,7 +3324,7 @@ use rustc_span::RemapPathScopeComponents;
             tcx: TyCtxt<'tcx>,
             enc_ctx: &mut EncCtx<'tcx, 'a>,
             func: &mir::Operand<'tcx>,
-            mut call_cpn: fn_call_data_cpn::Builder<'_>,
+            call_cpn: fn_call_data_cpn::Builder<'_>,
         ) {
             if std::env::var("SMALLSORT_R23_SOURCE_ARRAY_BORROW").as_deref() != Ok("1") {
                 return;
