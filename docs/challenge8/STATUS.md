@@ -1,4 +1,14 @@
-# ManuallyDrop::new — UPSTREAM_DRAFT_OPEN (2026-10-20)
+# VeriFast maintainer — текущее задание: консолидация tool-цепочки (2026-10-24)
+
+Текущее задание: [CURRENT-TASK](CURRENT-TASK.md), ID
+`verifast-toolchain-consolidation-2026-10-24-r3`, READY, сессия не начата.
+Разовое расширенное окно без ограничения времени (решение владельца 23.10,
+[PROGRESS-REVIEW §9](/root/verify-rust-std-evidence-brief/research/challenge-8/PROGRESS-REVIEW.md)).
+GCP 0; GitHub Actions разрешён. Цель: integration-ветка форка с Merge chain,
+Select overlays и ManuallyDrop, полный CI, COMPATIBILITY/trust ledger, findings
+авторам. Предыдущее задание (Windows CI readiness) завершено и заархивировано.
+
+## ManuallyDrop::new — UPSTREAM_DRAFT_OPEN (2026-10-20)
 
 [Upstream draft PR#1046](https://github.com/verifast/verifast/pull/1046) opened
 2026-10-20T08:12:51Z on the owner's subsequent explicit request. GitHub confirms
