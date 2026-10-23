@@ -396,7 +396,7 @@ fn capture_owned_nll_facts<'tcx>(
         {
             let mut captures = owned_nll_capture_store().lock().unwrap();
             if let Some(existing) = captures.get_mut(&def_id) {
-                if existing.fingerprint != capture.fingerprint {
+                if existing.fingerprint != capture.fingerprint || *existing != capture {
                     existing.conflicting = true;
                 }
             } else {
