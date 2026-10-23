@@ -100,7 +100,7 @@ module VariantDefRd = VfMirStub.Reader.VariantDef
 module FieldDefRd = VariantDefRd.FieldDef
 module RegionRd = VfMirStub.Reader.Region
 module RegionIdentityRd = RegionRd.Identity
-module RegionInferenceVariableRd = RegionIdentityRd.InferenceVariable
+module RegionInferenceVariableRd = RegionRd.InferenceVariable
 module GenericParamDefRd = VfMirStub.Reader.GenericParamDef
 module GenericParamDefKindRd = VfMirStub.Reader.GenericParamDefKind
 
