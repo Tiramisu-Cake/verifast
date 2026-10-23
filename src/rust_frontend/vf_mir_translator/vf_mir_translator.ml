@@ -7154,6 +7154,10 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
             | _ -> refuse plan.r23_pre_marker_loc
                 "the body has multiple slice::as_mut_ptr terminators"
           in
+          (match UnwindActionRd.get (FnCallDataRd.unwind_action_get call) with
+           | UnwindActionRd.Continue -> ()
+           | _ -> refuse plan.r23_pre_marker_loc
+               "the selected source as_mut_ptr call must have the checked Continue unwind action");
           let helper_body = match body_tr_defs_ctx.r23_checked_slice_helper with
             | Some body -> body
             | None -> refuse plan.r23_pre_marker_loc
@@ -9584,7 +9588,12 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                    | None -> Ast.static_error plan.r23_pre_marker_loc
                        "R23 adapter did not preserve the original method unwind outcome"
                        None
-                   | Some epilogue -> vf_bblocks @ epilogue)
+                   | Some ((first_epilogue_stmt :: _) as epilogue) ->
+                       let loc = Ast.stmt_loc first_epilogue_stmt in
+                       [Ast.BlockStmt (loc, [], vf_bblocks, loc, ref [])] @ epilogue
+                   | Some [] -> Ast.static_error plan.r23_pre_marker_loc
+                       "R23 adapter generated an empty unwind epilogue"
+                       None)
               | None -> vf_bblocks
             in
             Ok
