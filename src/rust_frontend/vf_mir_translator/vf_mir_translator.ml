@@ -2367,6 +2367,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
     r23_values_local : string;
     r23_begin_local : string;
     r23_values_state : string;
+    r23_lifetime_binding_loc : Ast.loc;
     mutable r23_ref_local : string option;
     mutable r23_unsize_local : string option;
     mutable r23_ref_seen : bool;
@@ -5335,10 +5336,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
               let r23_scoped_decls =
                 match State.r23_source_array_adapter with
                 | Some plan
-                  when (let ((file, line, _), _) = Ast.lexed_loc l
-                        and ((pre_file, pre_line, _), _) =
-                          Ast.lexed_loc plan.r23_pre_marker_loc in
-                        file = pre_file && line = pre_line) ->
+                  when l = plan.r23_lifetime_binding_loc ->
                     if plan.r23_scope_decls_inserted then
                       Ast.static_error plan.r23_pre_marker_loc
                         "R23 scoped local declarations were inserted more than once"
@@ -6715,6 +6713,18 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
               "close:r23_u64_array3_own"; "close:r23_u64_array3_fbc";
               "call:borrow"] then
             fail pre_loc "pre annotations differ from the exact checked array3 ownership sequence";
+          let r23_lifetime_binding_loc = match r23_lifetime_decl_locs with
+            | [binding_loc] -> binding_loc
+            | _ -> fail pre_loc
+                "R23 source adapter requires one extracted let_lft location" in
+          let pre_last_loc =
+            Ast.stmt_loc (List.hd (List.rev pre_source_commands)) in
+          let _, pre_last_end = Ast.lexed_loc pre_last_loc in
+          let binding_start, _ = Ast.lexed_loc r23_lifetime_binding_loc in
+          if pre_last_end > binding_start ||
+             binding_start >= source_pos post_loc then
+            fail r23_lifetime_binding_loc
+              "R23 pre-borrow commands must precede the let_lft scope and post marker";
           if post_shape <>
              ["call:end_lifetime"; "call:borrow_end";
               "call:r23_dispose_dead_array3_borrow";
@@ -6809,6 +6819,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
               r23_values_local = values;
               r23_begin_local = begin_local;
               r23_values_state = values_state;
+              r23_lifetime_binding_loc;
               r23_ref_local = None;
               r23_unsize_local = None;
               r23_ref_seen = false;
@@ -8107,21 +8118,23 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
       | Some plan ->
           let found = ref 0 in
           let blocks = List.map (function
-            | Ast.BlockStmt (_, decls, [], close, _)
+            | Ast.BlockStmt (start, decls, [], close, _)
               when List.exists (function
                 | Ast.TypeWithTypeidDecl (_, name,
                     Ast.CallExpr (_, "typeid_of_lft", [], [],
                       [Ast.LitPat (Ast.Var (_, token))], Ast.Static))
                   -> name = "'r23_borrow" && token = plan.r23_lifetime_token
                 | _ -> false) decls ->
-                  if source_pos plan.r23_pre_marker_loc >= source_pos plan.r23_post_marker_loc ||
+                  if start <> plan.r23_lifetime_binding_loc ||
+                     source_pos plan.r23_pre_marker_loc >= source_pos start ||
+                     source_pos start >= source_pos plan.r23_post_marker_loc ||
                      source_pos plan.r23_post_marker_loc >= source_pos close then
-                    Ast.static_error plan.r23_pre_marker_loc
-                      "R23 let_lft binding's enclosing function scope does not reach the post marker"
+                    Ast.static_error plan.r23_lifetime_binding_loc
+                      "R23 let_lft scope must start at its source declaration and reach the post marker"
                       None;
                   incr found;
                   Ast.BlockStmt
-                    (plan.r23_pre_marker_loc, decls, [], close, ref [])
+                    (start, decls, [], close, ref [])
             | block -> block) ghost_decl_blocks in
           if !found <> 1 then
             Ast.static_error plan.r23_pre_marker_loc
