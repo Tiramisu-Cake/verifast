@@ -302,7 +302,9 @@ struct OwnedNllCapture {
     source: String,
     point_locations: Vec<String>,
     loan_issued_at: Vec<String>,
+    // This is a derived Polonius output relation, absent from the input facts.
     origin_live_on_entry: Vec<String>,
+    origin_live_on_entry_available: bool,
     subset_base: Vec<String>,
     loan_killed_at: Vec<String>,
     diagnostic: String,
@@ -355,6 +357,7 @@ fn capture_owned_nll_facts<'tcx>(
             capture_mir_hash: owned_mir_debug_hash(&facts_body.body),
             capture_mir_phase: format!("{:?}", facts_body.body.phase),
             source: format!("{:?}", facts_body.body.source),
+            origin_live_on_entry_available: false,
             ..OwnedNllCapture::default()
         };
         if let (Some(facts), Some(locations)) =
@@ -365,11 +368,11 @@ fn capture_owned_nll_facts<'tcx>(
                 .map(|point| format!("{}={:?}", point.index(), locations.to_rich_location(point)))
                 .collect();
             capture.loan_issued_at = facts.loan_issued_at.iter().map(|row| format!("{row:?}")).collect();
-            capture.origin_live_on_entry = facts.origin_live_on_entry.iter().map(|row| format!("{row:?}")).collect();
             capture.subset_base = facts.subset_base.iter().map(|row| format!("{row:?}")).collect();
             capture.loan_killed_at = facts.loan_killed_at.iter().map(|row| format!("{row:?}")).collect();
+            capture.diagnostic = "origin_live_on_entry unavailable: derived output relation, not present in PoloniusInputFacts".to_owned();
         } else {
-            capture.diagnostic = "Polonius input facts or location table unavailable".to_owned();
+            capture.diagnostic = "Polonius input facts or location table unavailable; origin_live_on_entry unavailable from PoloniusInputFacts".to_owned();
         }
         OWNED_NLL_CAPTURES.with(|captures| {
             let mut captures = captures.borrow_mut();
@@ -1789,6 +1792,7 @@ use rustc_span::RemapPathScopeComponents;
                 nll_cpn.fill_point_locations(&capture.point_locations, |mut item, value| item.set(value));
                 nll_cpn.fill_loan_issued_at(&capture.loan_issued_at, |mut item, value| item.set(value));
                 nll_cpn.fill_origin_live_on_entry(&capture.origin_live_on_entry, |mut item, value| item.set(value));
+                nll_cpn.set_origin_live_on_entry_available(capture.origin_live_on_entry_available);
                 nll_cpn.fill_subset_base(&capture.subset_base, |mut item, value| item.set(value));
                 nll_cpn.fill_loan_killed_at(&capture.loan_killed_at, |mut item, value| item.set(value));
                 let emitted_hash = Self::captured_mir_hash(body);

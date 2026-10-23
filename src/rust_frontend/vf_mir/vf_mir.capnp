@@ -923,6 +923,7 @@ struct OwnedNllCapture {
     emittedMirHash @11: Text;
     emittedMirPhase @12: Text;
     mappingStatus @13: Text;
+    originLiveOnEntryAvailable @14: Bool;
 }
 
 struct Body {
