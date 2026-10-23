@@ -2542,7 +2542,7 @@ use rustc_span::RemapPathScopeComponents;
                     region_cpn.set_id(/*&format!("{:?}", region)*/ "'<erased>");
                 }
                 ty::RegionKind::ReErased => {
-                    region_cpn.init_identity().init_something().set_erased(());
+                    region_cpn.reborrow().init_identity().init_something().set_erased(());
                     region_cpn.set_id("'<erased>");
                 }
                 ty::RegionKind::RePlaceholder(_placeholder_region) => bug!(),
