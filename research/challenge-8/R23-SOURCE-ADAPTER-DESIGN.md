@@ -147,3 +147,15 @@ does not infer lifetime identity from MIR regions or change the checked
 borrow/return contract. The helper's full typed signature and cast-body
 comparison remain mandatory. This is a binding check for the existing
 source declaration, not a new lifetime or authority premise.
+
+## Decoder-layering correction
+
+`D.decode_ty` and `D.decode_generic_arg` convert Cap'n Proto Reader values to
+the translator's intermediate `D.ty` and `D.generic_arg` records. The local
+mutually-recursive `decode_ty`/`decode_generic_arg` functions then convert
+those intermediate records to the semantic polymorphic-variant representation
+used by type comparisons. R23 gates must apply the local decoder after the
+`D.decode_*` step whenever they match variants such as `` `Uint`` or
+`` `Ref``. This correction is compile/API layering only: it keeps the exact
+array3/u64 and typed-helper requirements unchanged. The earlier static API
+audit incorrectly treated the intermediate records as semantic variants.

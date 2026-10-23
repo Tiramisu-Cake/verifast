@@ -1824,7 +1824,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
     let size = Ast.SizeofExpr (loc, TypeExpr vf_ty) in
     let is_r23_u64_array3 =
       !r23_source_array3_interp_active &&
-      D.decode_ty elem_ty_cpn = `Uint D.U64 &&
+      decode_ty elem_ty_cpn = `Uint D.U64 &&
       Big_int.compare_big_int len (Big_int.big_int_of_int 3) = 0
     in
     let own tid vs =
@@ -2006,7 +2006,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
            | Some resolved -> resolved
            | None -> fail ())
       | _ ->
-          (match D.decode_ty ty with
+          (match decode_ty (D.decode_ty ty) with
            | `Uint D.U64 -> "u64"
            | _ -> fail ())
     in
@@ -2152,7 +2152,8 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
       let name = R23SliceProjectionGenericBindingRd.id_get binding in
       match (D.decode_generic_arg
         (R23SliceProjectionGenericBindingRd.value_get binding)).kind with
-      | Type (`Uint D.U64) when name = "T" -> Some (name, "u64")
+      | Type ty when name = "T" && decode_ty ty = `Uint D.U64 ->
+          Some (name, "u64")
       | _ -> None) generic_bindings in
     if List.length generic_bindings <> 1 ||
        u64_type_binding <> [ ("T", "u64") ] then
@@ -6625,7 +6626,8 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
           let is_u64_array3_ty ty_cpn loc =
             match TyKindRd.get (TyRd.kind_get ty_cpn) with
             | TyKindRd.Array array_ty ->
-                if D.decode_ty (ArrayTyRd.elem_ty_get array_ty) <> `Uint D.U64
+                if decode_ty (D.decode_ty (ArrayTyRd.elem_ty_get array_ty))
+                   <> `Uint D.U64
                 then Ok false
                 else
                   let* len_expr = translate_ty_const
@@ -6691,12 +6693,12 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                      let target_ty = CastDataRd.ty_get cast_data in
                      let source_ref_is_array3 = match cast_source with
                        | Some ty ->
-                           (match D.decode_ty ty with
+                           (match decode_ty (D.decode_ty ty) with
                             | `Ref (_, true, `Array) -> true
                             | _ -> false)
                        | None -> false in
                      let target_ref_is_u64_slice =
-                       match D.decode_ty target_ty with
+                       match decode_ty (D.decode_ty target_ty) with
                        | `Ref (_, true, `Slice (`Uint D.U64)) -> true
                        | _ -> false in
                      let pointer_coercion =
@@ -6764,7 +6766,8 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
             | None -> None in
           let* ref_local_is_array3 = match ref_local_ty with
             | Some ty ->
-                (match D.decode_ty ty, TyKindRd.get (TyRd.kind_get ty) with
+                (match decode_ty (D.decode_ty ty),
+                       TyKindRd.get (TyRd.kind_get ty) with
                  | `Ref (_, true, `Array), TyKindRd.Ref ref_ty ->
                      is_u64_array3_ty (RefTyRd.ty_get ref_ty)
                        plan.r23_pre_marker_loc
@@ -6772,7 +6775,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
             | None -> Ok false in
           let cast_local_is_slice = match cast_local_ty with
             | Some ty ->
-                (match D.decode_ty ty with
+                (match decode_ty (D.decode_ty ty) with
                  | `Ref (_, true, `Slice (`Uint D.U64)) -> true
                  | _ -> false)
             | None -> false in
