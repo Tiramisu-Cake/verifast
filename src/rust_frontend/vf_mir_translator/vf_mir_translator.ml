@@ -3730,7 +3730,13 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                             ( loc,
                               CallExpr (loc, "unwinding", [], [], [], Static),
                               (match State.r23_source_array_adapter with
-                               | Some plan ->
+                               | Some plan
+                                 when plan.r23_call_seen &&
+                                   (match fn_call_rexpr with
+                                    | FnCallOutcome
+                                        (Ast.CallExpr (_, helper_name, _, _, _, _)) ->
+                                        plan.r23_checked_helper_name = Some helper_name
+                                    | _ -> false) ->
                                    let recover = match !(State.r23_adapter_post_bridge) with
                                      | Some recover -> recover
                                      | None -> Ast.static_error loc
@@ -3755,7 +3761,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                                       fresh_first_callback_stmt plan.r23_post_stmt;
                                       array_to_array] @ unwind_stmts);
                                    [recover; Ast.GotoStmt (loc, plan.r23_unwind_label)]
-                               | None ->
+                               | Some _ | None ->
                               (match late_callback_cleanup,
                                      first_callback_cleanup, callback_cleanup with
                                | Some (plan, _), None, None ->
