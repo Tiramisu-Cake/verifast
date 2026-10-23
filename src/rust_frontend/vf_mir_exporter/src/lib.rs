@@ -489,6 +489,7 @@ use crate::vf_mir_capnp::span_data as span_data_cpn;
     use crate::vf_mir_capnp::visibility as visibility_cpn;
     use crate::vf_mir_capnp::variant_def as variant_def_cpn;
     use crate::vf_mir_capnp::operand as operand_cpn;
+    use crate::vf_mir_capnp::pointer_coercion_data as pointer_coercion_data_cpn;
     use crate::vf_mir_capnp::rvalue as rvalue_cpn;
     use crate::vf_mir_capnp::statement as statement_cpn;
     use crate::vf_mir_capnp::terminator as terminator_cpn;
