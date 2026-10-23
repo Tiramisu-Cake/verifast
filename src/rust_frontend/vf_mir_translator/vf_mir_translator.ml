@@ -6305,6 +6305,67 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
     let var_id_trs_map_ref = ref [] in
     let* fn_sig_loc = translate_span_data (fn_sig_span_get body_cpn) in
     let ghost_stmts_cpn = ghost_stmts_get_list body_cpn in
+    let r23_contains_substring text needle =
+      let text_len = String.length text and needle_len = String.length needle in
+      let rec loop i =
+        i + needle_len <= text_len &&
+        (String.sub text i needle_len = needle || loop (i + 1))
+      in
+      loop 0
+    in
+    let r23_body_name = TrName.translate_def_path (BodyRd.def_path_get body_cpn) in
+    let r23_target_body = r23_body_name = "b2_three_from_local" ||
+      String.ends_with ~suffix:"::b2_three_from_local" r23_body_name in
+    let r23_has_marker = List.exists (fun annot ->
+      let raw = AnnotationRd.raw_get annot in
+      r23_contains_substring raw "r23_source_array_borrow_adapter")
+      ghost_stmts_cpn in
+    let r23_represent_let_lft_as_decl =
+      Sys.getenv_opt "SMALLSORT_R23_SOURCE_ARRAY_BORROW" = Some "1" &&
+      r23_target_body && r23_has_marker
+    in
+    let r23_is_let_lft_annotation annot =
+      let raw = AnnotationRd.raw_get annot in
+      let contents =
+        if String.starts_with ~prefix:"//@" raw then
+          String.sub raw 3 (String.length raw - 3)
+        else if String.starts_with ~prefix:"/*@" raw then
+          let content = String.sub raw 3 (String.length raw - 3) in
+          if String.ends_with ~suffix:"@*/" content then
+            String.sub content 0 (String.length content - 3)
+          else content
+        else ""
+      in
+      let contents = String.trim contents in
+      String.starts_with ~prefix:"let_lft" contents &&
+      String.length contents > String.length "let_lft" &&
+      (contents.[String.length "let_lft"] = ' ' ||
+       contents.[String.length "let_lft"] = '\t')
+    in
+    let r23_lifetime_decl_annots, ordinary_ghost_stmts_cpn =
+      if r23_represent_let_lft_as_decl then
+        List.partition r23_is_let_lft_annotation ghost_stmts_cpn
+      else [], ghost_stmts_cpn
+    in
+    let* r23_lifetime_decl_blocks = ListAux.try_map (fun annot ->
+      let* body_span = translate_span_data (BodyRd.span_get body_cpn) in
+      let body_end_pos = snd (Ast.lexed_loc body_span) in
+      let body_end_loc = Ast.Lexed (body_end_pos, body_end_pos) in
+      let* translated = translate_annotation annot in
+      let start_pos, raw = translate_annot_to_vf_parser_inp translated in
+      let decl_raw =
+        if String.starts_with ~prefix:"//@" raw then
+          "/*@" ^ String.sub raw 3 (String.length raw - 3) ^ "@*/"
+        else raw
+      in
+      let declarations =
+        VfMirAnnotParser.parse_ghost_decl_batch (start_pos, decl_raw)
+      in
+      Ok (translated.span,
+        Ast.BlockStmt (translated.span, declarations, [], body_end_loc, ref [])))
+      r23_lifetime_decl_annots in
+    let r23_lifetime_decl_locs =
+      List.map fst r23_lifetime_decl_blocks in
     let stack_addr_occurrences =
       List.fold_left
         (fun total annot -> total + stack_addr_count (AnnotationRd.raw_get annot))
@@ -6323,7 +6384,10 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
       (ghost_decl_blocks_get_list body_cpn);
     List.iter reject_stack_addr_in_annotation
       (ContractRd.annotations_get_list (contract_get body_cpn));
-    let* ghost_stmts = ListAux.try_map translate_ghost_stmt ghost_stmts_cpn in
+    let* ghost_stmts = ListAux.try_map translate_ghost_stmt ordinary_ghost_stmts_cpn in
+    let ghost_stmts =
+      List.map (fun loc -> Ast.NoopStmt loc) r23_lifetime_decl_locs @ ghost_stmts
+    in
     let* ghost_stmts =
       ListAux.try_sort LocAux.compare_err_desc
         (fun s1 s2 ->
@@ -6335,6 +6399,9 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
     let* ghost_decl_blocks =
       ListAux.try_map translate_ghost_decl_block
         (ghost_decl_blocks_get_list body_cpn)
+    in
+    let ghost_decl_blocks =
+      List.map snd r23_lifetime_decl_blocks @ ghost_decl_blocks
     in
     (* This opt-in proof CFG is supplied by three adjacent ghost annotations.
        The exporter still sees the original Rust body and its original braces. *)
@@ -6440,6 +6507,19 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
              pre_file <> post_end_file || pre_line >= post_line ||
              pre_end_line > post_line || post_end_line < post_line then
             fail pre_loc "markers are not ordered in one source file";
+          let source_pos loc = fst (Ast.lexed_loc loc) in
+          let pre_pos = source_pos pre_loc in
+          let post_pos = source_pos post_loc in
+          List.iter (fun decl_loc ->
+            let decl_start, decl_end = Ast.lexed_loc decl_loc in
+            let (decl_file, _, _) = decl_start in
+            let (decl_end_file, _, _) = decl_end in
+            if decl_file <> pre_file || decl_end_file <> post_file ||
+               decl_start <= pre_pos || decl_start >= post_pos ||
+               decl_end > post_pos
+            then fail decl_loc
+              "R23 let_lft declaration must be between the exact source markers")
+            r23_lifetime_decl_locs;
           if pre_commands <> [] || post_commands <> [] then
             fail pre_loc "R23 line markers must be zero-authority single statements";
           let unpure = function
@@ -6454,10 +6534,14 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
           let source_loc stmt = fst (Ast.lexed_loc (Ast.stmt_loc stmt)) in
           let (pre_pos_file, pre_pos_line, _) = fst (Ast.lexed_loc pre_loc) in
           let (post_pos_file, post_pos_line, _) = fst (Ast.lexed_loc post_loc) in
+          let is_extracted_lifetime_noop = function
+            | Ast.NoopStmt loc -> List.mem loc r23_lifetime_decl_locs
+            | _ -> false in
           let pre_source_commands = List.filter (fun stmt ->
             let (file, line, _) = source_loc stmt in
             file = pre_pos_file && file = post_pos_file &&
-            pre_pos_line < line && line < post_pos_line)
+            pre_pos_line < line && line < post_pos_line &&
+            not (is_extracted_lifetime_noop stmt))
               ghost_stmts in
           let rec take_post_commands acc = function
             | [] -> fail post_loc "post annotation sequence lacks Array_to_array"
@@ -6531,6 +6615,17 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
            | _ -> fail post_loc
                "post marker must end and restore the same r23 array3 full-borrow content");
           let source_lft_name = "'r23_borrow" in
+          let source_lifetime_decl_count =
+            List.fold_left (fun count -> function
+              | Ast.BlockStmt (_, decls, _, _, _) ->
+                  count + List.length (List.filter (function
+                    | Ast.TypeWithTypeidDecl _ -> true
+                    | _ -> false) decls)
+              | _ -> count) 0 ghost_decl_blocks
+          in
+          if source_lifetime_decl_count <> 1 then
+            fail pre_loc
+              "R23 source adapter requires exactly one source let_lft declaration";
           let has_lft_binding =
             List.exists (function
               | Ast.BlockStmt (_, decls, _, _, _) ->
