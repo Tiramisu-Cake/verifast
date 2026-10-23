@@ -15,17 +15,11 @@
  */
 
 /***
- * This program is written based on "rust/src/test/run-make-fulldeps/obtain-borrowck"
- * This program implements a rustc driver that retrieves MIR bodies with
- * borrowck information. This cannot be done in a straightforward way because
- * `get_body_with_borrowck_facts`–the function for retrieving a MIR body with
- * borrowck facts–can panic if the body is stolen before it is invoked.
- * Therefore, the driver overrides `mir_borrowck` query (this is done in the
- * `config` callback), which retrieves the body that is about to be borrow
- * checked and stores it in a thread local `MIR_BODIES`. Then, `after_analysis`
- * callback triggers borrow checking of all MIR bodies by retrieving
- * `optimized_mir` and pulls out the MIR bodies with the borrowck information
- * from the thread local storage.
+ * Optional diagnostic NLL capture uses rustc's plural consumer API from the
+ * mir_borrowck provider. It copies only owned fact strings and point/location
+ * descriptions into thread-local storage; borrowck MIR/context never escapes
+ * the provider. Captured MIR metadata is kept separate from emitted MIR and
+ * does not establish a semantic mapping between those compiler stages.
  */
 
 extern crate rustc_abi;
@@ -42,7 +36,6 @@ extern crate rustc_span;
 mod hir_utils;
 mod preprocessor;
 
-use rustc_borrowck::consumers::BodyWithBorrowckFacts;
 use rustc_driver::Compilation;
 use rustc_hir::def_id::LocalDefId;
 use rustc_interface::interface::Compiler;
@@ -98,6 +91,7 @@ pub fn run_compiler() -> std::process::ExitCode {
         // Todo @Nima: Find the correct sysroot by yourself. for now we get it as an argument.
         // See filesearch::get_or_default_sysroot()
 
+        clear_owned_nll_captures();
         let mut callbacks = CompilerCalls {
             source_files: Box::leak(Box::new(std::sync::Mutex::new(SourceFiles::new()))),
             preprocess_mode,
@@ -216,8 +210,9 @@ impl rustc_driver::Callbacks for CompilerCalls {
             }));
         }
 
-        // assert!(config.override_queries.is_none());
-        // config.override_queries = Some(override_queries);
+        if owned_nll_facts_enabled() {
+            config.override_queries = Some(override_queries);
+        }
     }
 
     // In this callback we trigger borrow checking of all functions and obtain
@@ -270,7 +265,9 @@ impl rustc_driver::Callbacks for CompilerCalls {
         //     })
         //     .collect();
 
+        let owned_nll_captures = drain_owned_nll_captures();
         let mut vf_mir_capnp_builder = vf_mir_builder::VfMirCapnpBuilder::new(tcx);
+        vf_mir_capnp_builder.set_owned_nll_captures(owned_nll_captures);
         let mut directives = Vec::new();
         let mut ghost_ranges = Vec::new();
         self.source_files.lock().unwrap().export_data(
@@ -296,40 +293,105 @@ impl rustc_driver::Callbacks for CompilerCalls {
     }
 }
 
-// fn override_queries(_session: &Session, local: &mut rustc_middle::util::Providers) {
-//     local.queries.mir_borrowck = mir_borrowck;
-// }
+#[derive(Clone, Default, PartialEq, Eq)]
+struct OwnedNllCapture {
+    body_def_path_hash: String,
+    body_id: String,
+    capture_mir_hash: String,
+    capture_mir_phase: String,
+    source: String,
+    point_locations: Vec<String>,
+    loan_issued_at: Vec<String>,
+    origin_live_on_entry: Vec<String>,
+    subset_base: Vec<String>,
+    loan_killed_at: Vec<String>,
+    diagnostic: String,
+}
 
-// Since mir_borrowck does not have access to any other state, we need to use a
-// thread-local for storing the obtained MIR bodies.
-//
-// Note: We are using 'static lifetime here, which is in general unsound.
-// Unfortunately, that is the only lifetime allowed here. Our use is safe
-// because we cast it back to `'tcx` before using.
-// thread_local! {
-//     pub static MIR_BODIES:
-//         RefCell<HashMap<LocalDefId, BodyWithBorrowckFacts<'static>>> =
-//         RefCell::new(HashMap::new());
-// }
+thread_local! {
+    static OWNED_NLL_CAPTURES: RefCell<HashMap<LocalDefId, OwnedNllCapture>> =
+        RefCell::new(HashMap::new());
+}
 
-// fn mir_borrowck<'tcx>(tcx: TyCtxt<'tcx>, def_id: LocalDefId) -> rustc_middle::query::queries::mir_borrowck::ProvidedValue<'tcx> {
-//     let body_with_facts = rustc_borrowck::consumers::get_body_with_borrowck_facts(
-//         tcx,
-//         def_id,
-//         rustc_borrowck::consumers::ConsumerOptions::PoloniusOutputFacts
-//     );
-//     // SAFETY: The reader casts the 'static lifetime to 'tcx before using it.
-//     let body_with_facts: BodyWithBorrowckFacts<'static> =
-//         unsafe { std::mem::transmute(body_with_facts) };
-//     MIR_BODIES.with(|state| {
-//         let mut map = state.borrow_mut();
-//         assert!(map.insert(def_id, body_with_facts).is_none());
-//     });
-//     let mut providers = rustc_middle::util::Providers::default();
-//     rustc_borrowck::provide(&mut providers);
-//     let original_mir_borrowck = providers.mir_borrowck;
-//     original_mir_borrowck(tcx, def_id)
-// }
+fn owned_nll_facts_enabled() -> bool {
+    std::env::var_os("VF_EXPORT_OWNED_NLL_FACTS").as_deref() == Some(std::ffi::OsStr::new("1"))
+}
+
+fn clear_owned_nll_captures() {
+    OWNED_NLL_CAPTURES.with(|captures| captures.borrow_mut().clear());
+}
+
+fn drain_owned_nll_captures() -> HashMap<LocalDefId, OwnedNllCapture> {
+    OWNED_NLL_CAPTURES.with(|captures| std::mem::take(&mut *captures.borrow_mut()))
+}
+
+fn owned_mir_debug_hash(body: &mir::Body<'_>) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    format!("{body:#?}").hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
+
+fn override_queries(_session: &Session, providers: &mut rustc_middle::util::Providers) {
+    providers.queries.mir_borrowck = capture_owned_nll_facts;
+}
+
+fn capture_owned_nll_facts<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    root_def_id: LocalDefId,
+) -> rustc_middle::queries::mir_borrowck::ProvidedValue<'tcx> {
+    use rustc_borrowck::consumers::{self, ConsumerOptions};
+    use rustc_index::Idx;
+
+    let bodies = consumers::get_bodies_with_borrowck_facts(
+        tcx,
+        root_def_id,
+        ConsumerOptions::PoloniusInputFacts,
+    );
+    for (def_id, facts_body) in bodies {
+        let mut capture = OwnedNllCapture {
+            body_def_path_hash: format!("{:?}", tcx.def_path_hash(def_id.to_def_id())),
+            body_id: format!("{:?}", def_id),
+            capture_mir_hash: owned_mir_debug_hash(&facts_body.body),
+            capture_mir_phase: format!("{:?}", facts_body.body.phase),
+            source: format!("{:?}", facts_body.body.source),
+            ..OwnedNllCapture::default()
+        };
+        if let (Some(facts), Some(locations)) =
+            (facts_body.input_facts.as_deref(), facts_body.location_table.as_ref())
+        {
+            capture.point_locations = locations
+                .all_points()
+                .map(|point| format!("{}={:?}", point.index(), locations.to_rich_location(point)))
+                .collect();
+            capture.loan_issued_at = facts.loan_issued_at.iter().map(|row| format!("{row:?}")).collect();
+            capture.origin_live_on_entry = facts.origin_live_on_entry.iter().map(|row| format!("{row:?}")).collect();
+            capture.subset_base = facts.subset_base.iter().map(|row| format!("{row:?}")).collect();
+            capture.loan_killed_at = facts.loan_killed_at.iter().map(|row| format!("{row:?}")).collect();
+        } else {
+            capture.diagnostic = "Polonius input facts or location table unavailable".to_owned();
+        }
+        OWNED_NLL_CAPTURES.with(|captures| {
+            let mut captures = captures.borrow_mut();
+            if let Some(existing) = captures.get_mut(&def_id) {
+                if *existing != capture {
+                    existing.diagnostic = "conflicting body capture; fact mapping withheld".to_owned();
+                    existing.point_locations.clear();
+                    existing.loan_issued_at.clear();
+                    existing.origin_live_on_entry.clear();
+                    existing.subset_base.clear();
+                    existing.loan_killed_at.clear();
+                }
+            } else {
+                captures.insert(def_id, capture);
+            }
+        });
+    }
+
+    let mut providers = rustc_middle::util::Providers::default();
+    rustc_borrowck::provide(&mut providers.queries);
+    (providers.queries.mir_borrowck)(tcx, root_def_id)
+}
 
 struct TraitImplItemInfo {
     name: String,
@@ -453,23 +515,6 @@ impl<'tcx> rustc_hir::intravisit::Visitor<'tcx> for HirVisitor<'tcx> {
 
 }
 
-/// Pull MIR bodies stored in the thread-local.
-// fn get_bodies<'tcx>(tcx: TyCtxt<'tcx>) -> Vec<(String, BodyWithBorrowckFacts<'tcx>)> {
-//     MIR_BODIES.with(|state| {
-//         let mut map = state.borrow_mut();
-//         map.drain()
-//             .map(|(def_id, body): (LocalDefId, BodyWithBorrowckFacts<'static>)| {
-//                 let def_path = tcx.def_path(def_id.to_def_id());
-//                 // SAFETY: For soundness we need to ensure that the bodies have
-//                 // the same lifetime (`'tcx`), which they had before they were
-//                 // stored in the thread local.
-//                 let body_tcx: BodyWithBorrowckFacts<'tcx> = unsafe { std::mem::transmute(body) };
-//                 (def_path.to_string_no_crate_verbose(), body_tcx)
-//             })
-//             .collect()
-//     })
-// }
-
 mod vf_mir_builder {
     mod capnp_utils;
     use crate::preprocessor::GhostRange;
@@ -536,7 +581,7 @@ use rustc_span::RemapPathScopeComponents;
     use crate::vf_mir_capnp::file_name as file_name_cpn;
     use crate::vf_mir_capnp::loc as loc_cpn;
     use crate::vf_mir_capnp::statement_kind as statement_kind_cpn;
-    use std::collections::LinkedList;
+    use std::collections::{HashMap, LinkedList};
     use std::sync::Arc;
     use crate::vf_mir_capnp::terminator_kind as terminator_kind_cpn;
     use terminator_kind_cpn::fn_call_data as fn_call_data_cpn;
@@ -693,6 +738,7 @@ use rustc_span::RemapPathScopeComponents;
         ty_aliases: Vec<rustc_hir::def_id::LocalDefId>,
         trait_impls: Vec<super::TraitImplInfo>,
         bodies: Vec<(mir::Body<'tcx>, Span)>,
+        owned_nll_captures: HashMap<rustc_hir::def_id::LocalDefId, super::OwnedNllCapture>,
         annots: LinkedList<Box<GhostRange>>,
     }
 
@@ -705,6 +751,7 @@ use rustc_span::RemapPathScopeComponents;
                 ty_aliases: Vec::new(),
                 trait_impls: Vec::new(),
                 bodies: Vec::new(),
+                owned_nll_captures: HashMap::new(),
                 annots: LinkedList::new(),
             }
         }
@@ -735,6 +782,13 @@ use rustc_span::RemapPathScopeComponents;
 
         pub fn add_bodies(&mut self, bodies: Vec<(mir::Body<'tcx>, Span)>) {
             self.bodies = bodies;
+        }
+
+        pub(super) fn set_owned_nll_captures(
+            &mut self,
+            captures: HashMap<rustc_hir::def_id::LocalDefId, super::OwnedNllCapture>,
+        ) {
+            self.owned_nll_captures = captures;
         }
 
         pub fn build(
@@ -1297,7 +1351,10 @@ use rustc_span::RemapPathScopeComponents;
                     annot.span().unwrap().data().hi
                 }).collect::<Vec<_>>();
                 let mut enc_ctx = EncCtx::new(self.tcx, EncKind::Body(body), annots, mut_annots);
-                Self::encode_body(&mut enc_ctx, body_cpn, &self.bodies);
+                let nll_capture = self
+                    .owned_nll_captures
+                    .get(&body.source.def_id().expect_local());
+                Self::encode_body(&mut enc_ctx, body_cpn, &self.bodies, nll_capture);
                 req_adt_defs.extend(enc_ctx.get_req_adts());
             }
             for (index, glue) in generated.iter().enumerate() {
@@ -1700,7 +1757,12 @@ use rustc_span::RemapPathScopeComponents;
             }
         }
 
-        fn encode_body(enc_ctx: &mut EncCtx<'tcx, 'a>, mut body_cpn: body_cpn::Builder<'_>, exported_bodies: &[(mir::Body<'tcx>, Span)]) {
+        fn encode_body(
+            enc_ctx: &mut EncCtx<'tcx, 'a>,
+            mut body_cpn: body_cpn::Builder<'_>,
+            exported_bodies: &[(mir::Body<'tcx>, Span)],
+            nll_capture: Option<&super::OwnedNllCapture>,
+        ) {
             let tcx = enc_ctx.tcx;
             let body = enc_ctx.body();
             trace!("Encoding MIR: {:?}", body.source.instance);
@@ -1714,6 +1776,37 @@ use rustc_span::RemapPathScopeComponents;
             let def_id = body.source.def_id();
             body_cpn.set_captured_mir_hash(&Self::captured_mir_hash(body));
             body_cpn.set_captured_mir_phase(&format!("{:?}", body.phase));
+            if let Some(capture) = nll_capture {
+                let mut nll_cpn = body_cpn
+                    .reborrow()
+                    .init_owned_nll_capture()
+                    .init_something();
+                nll_cpn.set_body_def_path_hash(&capture.body_def_path_hash);
+                nll_cpn.set_body_id(&capture.body_id);
+                nll_cpn.set_capture_mir_hash(&capture.capture_mir_hash);
+                nll_cpn.set_capture_mir_phase(&capture.capture_mir_phase);
+                nll_cpn.set_source(&capture.source);
+                nll_cpn.fill_point_locations(&capture.point_locations, |mut item, value| item.set(value));
+                nll_cpn.fill_loan_issued_at(&capture.loan_issued_at, |mut item, value| item.set(value));
+                nll_cpn.fill_origin_live_on_entry(&capture.origin_live_on_entry, |mut item, value| item.set(value));
+                nll_cpn.fill_subset_base(&capture.subset_base, |mut item, value| item.set(value));
+                nll_cpn.fill_loan_killed_at(&capture.loan_killed_at, |mut item, value| item.set(value));
+                let emitted_hash = Self::captured_mir_hash(body);
+                let emitted_phase = format!("{:?}", body.phase);
+                let mut diagnostic = capture.diagnostic.clone();
+                if diagnostic.is_empty() {
+                    diagnostic = "diagnostic-only capture; cross-stage mapping is unestablished".to_owned();
+                }
+                if capture.capture_mir_hash != emitted_hash
+                    || capture.capture_mir_phase != emitted_phase
+                {
+                    diagnostic.push_str("; capture and emitted MIR hash/phase differ");
+                }
+                nll_cpn.set_diagnostic(&diagnostic);
+                nll_cpn.set_emitted_mir_hash(&emitted_hash);
+                nll_cpn.set_emitted_mir_phase(&emitted_phase);
+                nll_cpn.set_mapping_status("UNESTABLISHED");
+            }
 
             let kind = tcx.def_kind(def_id);
             let is_closure = match kind {

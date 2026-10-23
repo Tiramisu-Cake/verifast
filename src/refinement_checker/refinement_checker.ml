@@ -671,6 +671,7 @@ let fns_to_be_inlined: (string * body) list =
       captured_mir_hash="";
       captured_mir_phase="";
       region_scope_id="";
+      owned_nll_capture=None;
       visibility=Public;
     }
   );
@@ -775,6 +776,7 @@ let fns_to_be_inlined: (string * body) list =
       captured_mir_hash="";
       captured_mir_phase="";
       region_scope_id="";
+      owned_nll_capture=None;
     visibility=Public;
   }
   );
@@ -1019,6 +1021,7 @@ let fns_to_be_inlined: (string * body) list =
       captured_mir_hash="";
       captured_mir_phase="";
       region_scope_id="";
+      owned_nll_capture=None;
     visibility=Public;
   });
   ("std::result::Result::<T, E>::map_err",
@@ -1262,6 +1265,7 @@ let fns_to_be_inlined: (string * body) list =
       captured_mir_hash="";
       captured_mir_phase="";
       region_scope_id="";
+      owned_nll_capture=None;
     visibility=Public;
   });
   ("std::option::Option::<T>::map",
@@ -1483,6 +1487,7 @@ let fns_to_be_inlined: (string * body) list =
       captured_mir_hash="";
       captured_mir_phase="";
       region_scope_id="";
+      owned_nll_capture=None;
     visibility=Public;
   });
   "std::option::Option::<T>::unwrap_or_else",
@@ -1668,6 +1673,7 @@ let fns_to_be_inlined: (string * body) list =
       captured_mir_hash="";
       captured_mir_phase="";
       region_scope_id="";
+      owned_nll_capture=None;
     visibility=Public;
   }
 ]

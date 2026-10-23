@@ -906,6 +906,25 @@ struct Contract {
     span @1: SpanData;
 }
 
+# Diagnostic-only borrowck consumer data. Facts use identifiers and locations
+# from the capture MIR, whose mapping to the exported MIR is unestablished.
+struct OwnedNllCapture {
+    bodyDefPathHash @0: Text;
+    bodyId @1: Text;
+    captureMirHash @2: Text;
+    captureMirPhase @3: Text;
+    source @4: Text;
+    pointLocations @5: List(Text);
+    loanIssuedAt @6: List(Text);
+    originLiveOnEntry @7: List(Text);
+    subsetBase @8: List(Text);
+    loanKilledAt @9: List(Text);
+    diagnostic @10: Text;
+    emittedMirHash @11: Text;
+    emittedMirPhase @12: Text;
+    mappingStatus @13: Text;
+}
+
 struct Body {
     struct DefKind {
         union {
@@ -956,6 +975,7 @@ struct Body {
     capturedMirPhase @29: Text;
     regionScopeId @30: Text; # Scope for Region.inferenceVariable IDs in this body only.
     visibility @22: Visibility;
+    ownedNllCapture @31: Option(OwnedNllCapture);
 }
 
 struct Trait {
