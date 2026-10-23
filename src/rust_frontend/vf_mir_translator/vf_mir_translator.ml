@@ -4605,9 +4605,9 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                 (loc, Ast.PtrTypeExpr (loc, u64_ty), expr) in
               let len = Ast.IntLit
                 (loc, Big_int.big_int_of_int 3, true, true, Ast.NoLSuffix) in
-              let slice_ptr = Ast.CallExpr
+              let slice_ptr = result_of_outcome loc (Ast.CallExpr
                 (loc, "std::ptr::slice_from_raw_parts_mut", [u64_ty], [],
-                 [Ast.LitPat data_ptr; Ast.LitPat len], Ast.Static) in
+                 [Ast.LitPat data_ptr; Ast.LitPat len], Ast.Static)) in
               (* Keep the compiler-exported temporary type. An erased MIR
                  region is recorded unchanged, but this one proof AST
                  temporary is instantiated at the explicit source interval.
