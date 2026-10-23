@@ -1041,6 +1041,10 @@ struct VfMir {
     bodies @1: List(Body);
     ghostDeclBatches @2: List(Annotation);
     modules @6: List(Module);
+    ownedNllCaptureEnabled @10: Bool;
+    ownedNllCaptureCount @11: UInt32;
+    ownedNllCaptureAttachedCount @12: UInt32;
+    ownedNllCaptureUnattachedCount @13: UInt32;
 }
 #Todo @Nima: For Clarity write a struct fields on top and then inner type definitions
 #Todo @Nima: Use a uniform naming. def_path for Rust style definition paths and Name for their corresponding translated names.

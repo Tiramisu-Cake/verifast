@@ -44,9 +44,7 @@ use rustc_middle::mir;
 use rustc_middle::ty::{self, TyCtxt};
 use rustc_session::Session;
 use rustc_span::Span;
-use std::cell::RefCell;
 use std::collections::HashMap;
-use std::thread_local;
 use tracing::{debug, error, info, trace, Level};
 
 #[derive(PartialEq)]
@@ -308,11 +306,15 @@ struct OwnedNllCapture {
     subset_base: Vec<String>,
     loan_killed_at: Vec<String>,
     diagnostic: String,
+    fingerprint: u64,
+    conflicting: bool,
 }
 
-thread_local! {
-    static OWNED_NLL_CAPTURES: RefCell<HashMap<LocalDefId, OwnedNllCapture>> =
-        RefCell::new(HashMap::new());
+static OWNED_NLL_CAPTURES: std::sync::OnceLock<std::sync::Mutex<HashMap<LocalDefId, OwnedNllCapture>>> =
+    std::sync::OnceLock::new();
+
+fn owned_nll_capture_store() -> &'static std::sync::Mutex<HashMap<LocalDefId, OwnedNllCapture>> {
+    OWNED_NLL_CAPTURES.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
 }
 
 fn owned_nll_facts_enabled() -> bool {
@@ -320,11 +322,11 @@ fn owned_nll_facts_enabled() -> bool {
 }
 
 fn clear_owned_nll_captures() {
-    OWNED_NLL_CAPTURES.with(|captures| captures.borrow_mut().clear());
+    owned_nll_capture_store().lock().unwrap().clear();
 }
 
 fn drain_owned_nll_captures() -> HashMap<LocalDefId, OwnedNllCapture> {
-    OWNED_NLL_CAPTURES.with(|captures| std::mem::take(&mut *captures.borrow_mut()))
+    std::mem::take(&mut *owned_nll_capture_store().lock().unwrap())
 }
 
 fn owned_mir_debug_hash(body: &mir::Body<'_>) -> String {
@@ -332,6 +334,22 @@ fn owned_mir_debug_hash(body: &mir::Body<'_>) -> String {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     format!("{body:#?}").hash(&mut hasher);
     format!("{:016x}", hasher.finish())
+}
+
+fn owned_nll_capture_fingerprint(capture: &OwnedNllCapture) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    capture.body_def_path_hash.hash(&mut hasher);
+    capture.body_id.hash(&mut hasher);
+    capture.capture_mir_hash.hash(&mut hasher);
+    capture.capture_mir_phase.hash(&mut hasher);
+    capture.source.hash(&mut hasher);
+    capture.point_locations.hash(&mut hasher);
+    capture.loan_issued_at.hash(&mut hasher);
+    capture.subset_base.hash(&mut hasher);
+    capture.loan_killed_at.hash(&mut hasher);
+    capture.diagnostic.hash(&mut hasher);
+    hasher.finish()
 }
 
 fn override_queries(_session: &Session, providers: &mut rustc_middle::util::Providers) {
@@ -374,21 +392,17 @@ fn capture_owned_nll_facts<'tcx>(
         } else {
             capture.diagnostic = "Polonius input facts or location table unavailable; origin_live_on_entry unavailable from PoloniusInputFacts".to_owned();
         }
-        OWNED_NLL_CAPTURES.with(|captures| {
-            let mut captures = captures.borrow_mut();
+        capture.fingerprint = owned_nll_capture_fingerprint(&capture);
+        {
+            let mut captures = owned_nll_capture_store().lock().unwrap();
             if let Some(existing) = captures.get_mut(&def_id) {
-                if *existing != capture {
-                    existing.diagnostic = "conflicting body capture; fact mapping withheld".to_owned();
-                    existing.point_locations.clear();
-                    existing.loan_issued_at.clear();
-                    existing.origin_live_on_entry.clear();
-                    existing.subset_base.clear();
-                    existing.loan_killed_at.clear();
+                if existing.fingerprint != capture.fingerprint {
+                    existing.conflicting = true;
                 }
             } else {
                 captures.insert(def_id, capture);
             }
-        });
+        }
     }
 
     let mut providers = rustc_middle::util::Providers::default();
@@ -802,6 +816,22 @@ use rustc_span::RemapPathScopeComponents;
             let mut vf_mir_cpn = msg_cpn.init_root();
             vf_mir_cpn.set_target_triple(&compiler.sess.target.llvm_target);
             vf_mir_cpn.set_pointer_width(compiler.sess.target.pointer_width.try_into().unwrap());
+            let attached_capture_ids = self
+                .bodies
+                .iter()
+                .filter_map(|(body, _)| {
+                    let def_id = body.source.def_id().expect_local();
+                    self.owned_nll_captures.contains_key(&def_id).then_some(def_id)
+                })
+                .collect::<std::collections::HashSet<_>>();
+            let capture_count = self.owned_nll_captures.len();
+            let attached_count = attached_capture_ids.len();
+            vf_mir_cpn.set_owned_nll_capture_enabled(super::owned_nll_facts_enabled());
+            vf_mir_cpn.set_owned_nll_capture_count(capture_count.try_into().unwrap());
+            vf_mir_cpn.set_owned_nll_capture_attached_count(attached_count.try_into().unwrap());
+            vf_mir_cpn.set_owned_nll_capture_unattached_count(
+                capture_count.saturating_sub(attached_count).try_into().unwrap(),
+            );
             self.encode_trait_impls(&mut vf_mir_cpn);
             self.encode_mir(vf_mir_cpn);
             msg_cpn
@@ -1789,15 +1819,21 @@ use rustc_span::RemapPathScopeComponents;
                 nll_cpn.set_capture_mir_hash(&capture.capture_mir_hash);
                 nll_cpn.set_capture_mir_phase(&capture.capture_mir_phase);
                 nll_cpn.set_source(&capture.source);
-                nll_cpn.fill_point_locations(&capture.point_locations, |mut item, value| item.set(value));
-                nll_cpn.fill_loan_issued_at(&capture.loan_issued_at, |mut item, value| item.set(value));
-                nll_cpn.fill_origin_live_on_entry(&capture.origin_live_on_entry, |mut item, value| item.set(value));
+                if !capture.conflicting {
+                    nll_cpn.fill_point_locations(&capture.point_locations);
+                    nll_cpn.fill_loan_issued_at(&capture.loan_issued_at);
+                    nll_cpn.fill_origin_live_on_entry(&capture.origin_live_on_entry);
+                    nll_cpn.fill_subset_base(&capture.subset_base);
+                    nll_cpn.fill_loan_killed_at(&capture.loan_killed_at);
+                }
                 nll_cpn.set_origin_live_on_entry_available(capture.origin_live_on_entry_available);
-                nll_cpn.fill_subset_base(&capture.subset_base, |mut item, value| item.set(value));
-                nll_cpn.fill_loan_killed_at(&capture.loan_killed_at, |mut item, value| item.set(value));
                 let emitted_hash = Self::captured_mir_hash(body);
                 let emitted_phase = format!("{:?}", body.phase);
-                let mut diagnostic = capture.diagnostic.clone();
+                let mut diagnostic = if capture.conflicting {
+                    "conflicting body captures; point mapping and fact rows withheld".to_owned()
+                } else {
+                    capture.diagnostic.clone()
+                };
                 if diagnostic.is_empty() {
                     diagnostic = "diagnostic-only capture; cross-stage mapping is unestablished".to_owned();
                 }
