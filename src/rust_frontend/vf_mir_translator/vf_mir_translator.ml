@@ -10605,6 +10605,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                                            {
                                              id =
                                                List.assoc name env.lifetime_env;
+                                             identity = Nothing;
                                            };
                                      }
                                  | Type ->
