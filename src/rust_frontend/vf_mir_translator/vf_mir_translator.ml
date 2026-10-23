@@ -6546,16 +6546,18 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
     let r23_adapter_marker name stmt =
       let unpure = function Ast.PureStmt (_, inner) -> inner | stmt -> stmt in
       match unpure stmt with
-      | Ast.BlockStmt (loc, [], head :: commands, close, _) ->
+      | Ast.BlockStmt (_, [], head :: commands, close, _) ->
           let head = unpure head in
           (match head with
            | Ast.ExprStmt
                (Ast.CallExpr (_, found, [], [], args, Ast.Static))
-             when found = name -> Some (loc, close, args, commands)
+             when found = name -> Some (Ast.stmt_loc stmt, close, args, commands)
            | _ -> None)
       | Ast.ExprStmt
-          (Ast.CallExpr (loc, found, [], [], args, Ast.Static))
-        when found = name -> Some (loc, loc, args, [])
+          (Ast.CallExpr (_, found, [], [], args, Ast.Static))
+        when found = name ->
+          let slot_loc = Ast.stmt_loc stmt in
+          Some (slot_loc, slot_loc, args, [])
       | _ -> None
     in
     let r23_raw_marker_call name stmt =
