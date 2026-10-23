@@ -94,7 +94,6 @@ module FnPtrTyRd = TyKindRd.FnPtrTy
 module FnDefIdRd = VfMirStub.Reader.FnDefId
 module GenArgRd = VfMirStub.Reader.GenericArg
 module GenArgKindRd = VfMirStub.Reader.GenericArgKind
-module RawPtrTyRd = TyKindRd.RawPtrTy
 module RefTyRd = TyKindRd.RefTy
 module AdtDefRd = VfMirStub.Reader.AdtDef
 module VariantDefRd = VfMirStub.Reader.VariantDef
