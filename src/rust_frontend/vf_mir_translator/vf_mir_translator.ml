@@ -2130,6 +2130,8 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                (match OptionRd.get (RawPtrDataRd.raw_ptr_kind_get raw_ptr_data) with
                 | OptionRd.Something kind_ptr ->
                     let kind_data = VfMirRd.of_pointer kind_ptr in
+                    if kind_data = None then
+                      fail "raw pointer kind metadata payload is absent";
                     (match RawPtrKindRd.get kind_data with
                      | RawPtrKindRd.Mut -> ()
                      | RawPtrKindRd.Const
