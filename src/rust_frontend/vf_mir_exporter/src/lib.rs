@@ -2895,6 +2895,17 @@ use rustc_span::RemapPathScopeComponents;
                 mir::Rvalue::ThreadLocalRef(def_id) => rvalue_cpn.set_thread_local_ref(()),
                 mir::Rvalue::RawPtr(raw_ptr_kind, place) => {
                     let mut raw_ptr_data_cpn = rvalue_cpn.init_raw_ptr();
+                    let mut raw_ptr_kind_cpn = raw_ptr_data_cpn
+                        .reborrow()
+                        .init_raw_ptr_kind()
+                        .init_something();
+                    match raw_ptr_kind {
+                        mir::RawPtrKind::Mut => raw_ptr_kind_cpn.set_mut(()),
+                        mir::RawPtrKind::Const => raw_ptr_kind_cpn.set_const(()),
+                        mir::RawPtrKind::FakeForPtrMetadata => {
+                            raw_ptr_kind_cpn.set_fake_for_ptr_metadata(())
+                        }
+                    }
                     let mutability_cpn = raw_ptr_data_cpn.reborrow().init_mutability();
                     Self::encode_mutability(match raw_ptr_kind {
                         mir::RawPtrKind::Mut => mir::Mutability::Mut,
@@ -3431,6 +3442,9 @@ use rustc_span::RemapPathScopeComponents;
             if !matches!(block.terminator().kind, mir::TerminatorKind::Return) {
                 return Some("callee MIR terminator is not Return");
             }
+            let mut projection_step_count = 0;
+            let mut raw_ptr_local = None;
+            let mut raw_ptr_cast_seen = false;
             for statement in &block.statements {
                 if matches!(
                     &statement.kind,
@@ -3450,10 +3464,53 @@ use rustc_span::RemapPathScopeComponents;
                     return Some("callee MIR assignment does not target a bare local");
                 }
                 match rvalue {
-                    mir::Rvalue::Use(mir::Operand::Copy(_) | mir::Operand::Move(_), _) => {}
-                    mir::Rvalue::Cast(_, mir::Operand::Copy(_) | mir::Operand::Move(_), _) => {}
+                    mir::Rvalue::Use(mir::Operand::Copy(_) | mir::Operand::Move(_), _)
+                        if raw_ptr_local.is_none() =>
+                    {
+                        projection_step_count += 1;
+                    }
+                    mir::Rvalue::Cast(
+                        mir::CastKind::PtrToPtr,
+                        mir::Operand::Copy(place) | mir::Operand::Move(place),
+                        _,
+                    ) if raw_ptr_local == Some(place.local)
+                        && !raw_ptr_cast_seen
+                        && place.projection.is_empty()
+                        && lhs.local.as_u32() == 0 =>
+                    {
+                        raw_ptr_cast_seen = true;
+                        projection_step_count += 1;
+                    }
+                    mir::Rvalue::Cast(_, mir::Operand::Copy(_) | mir::Operand::Move(_), _)
+                        if raw_ptr_local.is_none() =>
+                    {
+                        projection_step_count += 1;
+                    }
+                    mir::Rvalue::RawPtr(mir::RawPtrKind::Mut, place)
+                        if raw_ptr_local.is_none()
+                            && projection_step_count == 0
+                            && lhs.local.as_u32() != 0
+                            && lhs.local.as_u32() != 1
+                            && place.local.as_u32() == 1
+                            && place.projection.len() == 1
+                            && place
+                                .projection
+                                .iter()
+                                .all(|elem| matches!(elem, mir::ProjectionElem::Deref)) =>
+                    {
+                        raw_ptr_local = Some(lhs.local);
+                        projection_step_count += 1;
+                    }
+                    mir::Rvalue::RawPtr(_, _) => {
+                        return Some(
+                            "callee MIR raw pointer step is not the mutable receiver dereference",
+                        );
+                    }
                     _ => return Some("callee MIR contains an unsupported projection step"),
                 }
+            }
+            if raw_ptr_local.is_some() && !raw_ptr_cast_seen {
+                return Some("callee MIR raw pointer step lacks its final PtrToPtr cast");
             }
             None
         }

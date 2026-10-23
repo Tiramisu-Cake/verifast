@@ -1978,11 +1978,11 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
     r23_projection_statement_count : int;
   }
 
-  (* Normalize only a straight-line, one-input, cast-only body. This is a
-     structural equivalence check for the concrete slice data projection; it
-     deliberately rejects operations that could create references, access
-     memory, call code, or branch. Reference lifetime spellings are omitted
-     from this pure type key, while mutability and all pointee types remain. *)
+  (* Normalize only a straight-line, one-input body made of pointer casts, or
+     the exact mutable receiver-dereference raw-pointer step followed by its
+     single data-pointer cast. This structural check rejects other operations
+     that could access memory, call code, or branch. Reference lifetime
+     spellings are omitted from the type key; mutability and pointee types stay. *)
   let r23_projection_mutability mutability_cpn =
     match MutabilityRd.get mutability_cpn with
     | MutabilityRd.Mut -> "mut"
@@ -2088,6 +2088,8 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
     let storage_started = ref [] in
     let storage_ended = ref [] in
     let steps = ref [] in
+    let raw_ptr_local = ref None in
+    let cast_count = ref 0 in
     (* Locals with no storage markers are live for the whole body. For marked
        temporaries, accept only one explicit, balanced Live/Dead pair. *)
     let local_is_live id = match List.assoc_opt id !storage_states with
@@ -2120,8 +2122,53 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
           if PlaceRd.projection_get_list lhs <> [] then
             fail "projection writes through a place projection";
           let dst = LocalDeclIdRd.name_get (PlaceRd.local_get lhs) in
-          let cast = AssignDataRd.rhs_rvalue_get data in
-          (match RvalueRd.get cast with
+          let rvalue = AssignDataRd.rhs_rvalue_get data in
+          (match RvalueRd.get rvalue with
+           | RvalueRd.RawPtr raw_ptr_data ->
+               if !raw_ptr_local <> None || !assigned <> [] then
+                 fail "raw pointer address is not the first value projection step";
+               (match OptionRd.get (RawPtrDataRd.raw_ptr_kind_get raw_ptr_data) with
+                | OptionRd.Something kind_ptr ->
+                    let kind_data = VfMirRd.of_pointer kind_ptr in
+                    (match RawPtrKindRd.get kind_data with
+                     | RawPtrKindRd.Mut -> ()
+                     | RawPtrKindRd.Const
+                     | RawPtrKindRd.FakeForPtrMetadata ->
+                         fail "raw pointer kind is not exact Mut"
+                     | _ -> fail "raw pointer kind is unknown")
+                | OptionRd.Nothing ->
+                    fail "raw pointer kind metadata is absent");
+               if MutabilityRd.get (RawPtrDataRd.mutability_get raw_ptr_data) <>
+                    MutabilityRd.Mut then
+                 fail "raw pointer mutability is not Mut";
+               let place = RawPtrDataRd.place_get raw_ptr_data in
+               let is_mutable_ref = match PlaceKindRd.get (PlaceRd.kind_get place) with
+                 | PlaceKindRd.MutableRef -> true
+                 | _ -> false in
+               let is_single_deref = match PlaceRd.projection_get_list place with
+                 | [elem] ->
+                     (match PlaceElementRd.get elem with
+                      | PlaceElementRd.Deref -> true
+                      | _ -> false)
+                 | _ -> false in
+               if LocalDeclIdRd.name_get (PlaceRd.local_get place) <> input_local ||
+                  not is_mutable_ref || not is_single_deref then
+                 fail "raw pointer place is not exactly a mutable receiver dereference";
+               let source_key = local_input_key
+               and target_key = r23_projection_type_key loc generic_bindings (local_ty dst) in
+               if source_key <> "ref-mut(slice(u64))" ||
+                  target_key <> "raw-mut(slice(u64))" || dst = input_local ||
+                  dst = output_local || not (local_is_live input_local) ||
+                  not (local_is_live dst) then
+                 fail "raw pointer step has the wrong receiver, destination type, or storage state";
+               raw_ptr_local := Some dst;
+               provenance := dst :: !provenance;
+               assigned := dst :: !assigned;
+               step_edges := !step_edges @ [(input_local, dst)];
+               let edge = source_key ^ "->" ^ target_key ^ ":raw-ptr-mut-deref" in
+               steps := edge :: !steps;
+               "raw-ptr-mut-deref:" ^ string_of_int (local_index input_local) ^ ":" ^
+               string_of_int (local_index dst) ^ ":" ^ edge
            | RvalueRd.Cast cast_data ->
                let src = match OperandRd.get (CastDataRd.operand_get cast_data) with
                  | OperandRd.Copy place | OperandRd.Move place
@@ -2157,6 +2204,14 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                            | _ -> fail "unsupported pointer coercion in projection")
                       | _ -> fail "pointer coercion omits its typed kind")
                  | _ -> fail "projection contains a non-pointer cast" in
+               (match !raw_ptr_local with
+                | None -> ()
+                | Some raw_local ->
+                    if src <> raw_local || dst <> output_local || !cast_count <> 0 ||
+                       source_key <> "raw-mut(slice(u64))" ||
+                       target_key <> "raw-mut(u64)" || cast_kind <> "ptr-to-ptr" then
+                      fail "raw slice pointer is not followed by exactly one PtrToPtr data-pointer cast");
+               incr cast_count;
                provenance := dst :: !provenance;
                assigned := dst :: !assigned;
                step_edges := !step_edges @ [(src, dst)];
@@ -2168,6 +2223,10 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
       | _ -> fail "projection contains a non-assignment statement")
       statements in
     let steps = List.rev !steps in
+    (match !raw_ptr_local with
+     | Some _ when !cast_count <> 1 ->
+         fail "raw pointer projection lacks exactly one final PtrToPtr cast"
+     | _ -> ());
     if List.sort_uniq String.compare !storage_started <>
          List.sort_uniq String.compare storage_locals ||
        List.sort_uniq String.compare !storage_ended <>

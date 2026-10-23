@@ -666,6 +666,7 @@ struct Rvalue {
     struct RawPtrData {
         mutability @0: Mutability;
         place @1: Place;
+        rawPtrKind @2: Option(RawPtrKind); # Legacy/synthetic records may omit this; the R23 projection rejects absence.
     }
 
     struct BinaryOpData {
@@ -753,6 +754,14 @@ struct Rvalue {
         unaryOp @6: UnaryOpData;
         aggregate @5: AggregateData;
         discriminant @7: DiscriminantData;
+    }
+}
+
+struct RawPtrKind {
+    union {
+        mut @0: Void;
+        const @1: Void;
+        fakeForPtrMetadata @2: Void;
     }
 }
 
