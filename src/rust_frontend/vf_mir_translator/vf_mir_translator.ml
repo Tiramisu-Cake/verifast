@@ -3559,7 +3559,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                      e ))
             in
             let assignment_with_r23_recovery e =
-              match State.r23_adapter_post_bridge with
+              match !(State.r23_adapter_post_bridge) with
               | None -> assignment e
               | Some recover ->
                   Ast.BlockStmt
@@ -3585,7 +3585,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                                   [ LitPat (Var (loc, "__result")) ],
                                   Static ),
                               [ assignment (Ast.Var (loc, "__result")) ] @
-                              (match State.r23_adapter_post_bridge with
+                              (match !(State.r23_adapter_post_bridge) with
                                | Some recover -> [recover]
                                | None -> []) @
                               (match late_callback_cleanup,
@@ -3606,7 +3606,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                               CallExpr (loc, "unwinding", [], [], [], Static),
                               (match State.r23_source_array_adapter with
                                | Some plan ->
-                                   let recover = match State.r23_adapter_post_bridge with
+                                   let recover = match !(State.r23_adapter_post_bridge) with
                                      | Some recover -> recover
                                      | None -> Ast.static_error loc
                                          "R23 slice recovery bridge is missing on unwind"
@@ -4358,7 +4358,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                   true
               | [] -> false
           in
-          if State.r23_adapter_ref_assignment then
+          if !(State.r23_adapter_ref_assignment) then
             (* The marked reference is represented by its place pointer only.
                The source marker has already created the RustBelt full borrow;
                do not create a TreeBorrows ref_mut_end_token here. *)
@@ -4464,7 +4464,7 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
             in
             Ok (`TrRvalueExpr e)
           | _ ->
-          match State.r23_adapter_unsize_assignment, operand with
+          match !(State.r23_adapter_unsize_assignment), operand with
           | true,
             (`TrOperandCopy expr | `TrOperandMove (expr, _) |
              `TrTypedConstantScalar expr) ->
