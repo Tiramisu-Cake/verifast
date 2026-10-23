@@ -3351,16 +3351,16 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                      let slice_raw_ty = Ast.PtrTypeExpr
                        (fn_loc, Ast.SliceTypeExpr (fn_loc, gen_arg_ty_info.vf_ty)) in
                      let slice_raw = Ast.CastExpr (fn_loc, slice_raw_ty, arg) in
-                     let pre_bridge = Ast.ExprStmt
+                     let pre_bridge = Ast.PureStmt (fn_loc, Ast.ExprStmt
                        (Ast.CallExpr
                           (fn_loc, "r23_array3_borrow_to_slice", [], [],
                            [ Ast.LitPat k; Ast.LitPat t; Ast.LitPat p;
-                             Ast.LitPat slice_raw ], Ast.Static)) in
-                     let post_bridge = Ast.ExprStmt
+                             Ast.LitPat slice_raw ], Ast.Static))) in
+                     let post_bridge = Ast.PureStmt (fn_loc, Ast.ExprStmt
                        (Ast.CallExpr
                           (fn_loc, "r23_slice_borrow_to_array3", [], [],
                            [ Ast.LitPat k; Ast.LitPat t; Ast.LitPat p;
-                             Ast.LitPat slice_raw ], Ast.Static)) in
+                             Ast.LitPat slice_raw ], Ast.Static))) in
                      State.r23_adapter_post_bridge := Some post_bridge;
                      let* _, helper_call = translate_regular_fn_call
                        ~targs_override:
@@ -3746,15 +3746,19 @@ module Make (Args : VF_MIR_TRANSLATOR_ARGS) = struct
                                      Ast.static_error loc
                                        "R23 source adapter generated more than one unwind epilogue"
                                        None;
-                                   let array_to_array = Ast.ExprStmt (Ast.CallExpr
-                                     (loc, "array_to_array_", [], [],
-                                      [Ast.LitPat (Ast.CastExpr
-                                        (loc,
-                                         Ast.PtrTypeExpr
-                                           (loc, Ast.ManifestTypeExpr
-                                             (loc, Ast.Int
-                                               (Ast.Unsigned, Ast.FixedWidthRank 3))),
-                                         Ast.Var (loc, "r23_array_p")))], Ast.Static)) in
+                                   let array_to_array =
+                                     Ast.PureStmt (loc,
+                                       Ast.ExprStmt
+                                         (Ast.CallExpr
+                                            (loc, "array_to_array_", [], [],
+                                             [Ast.LitPat (Ast.CastExpr
+                                               (loc,
+                                                Ast.PtrTypeExpr
+                                                  (loc, Ast.ManifestTypeExpr
+                                                    (loc, Ast.Int
+                                                      (Ast.Unsigned, Ast.FixedWidthRank 3))),
+                                                Ast.Var (loc, "r23_array_p")))],
+                                             Ast.Static))) in
                                    plan.r23_unwind_epilogue <- Some (
                                      [Ast.Assert (loc, Ast.False loc);
                                       Ast.LabelStmt (loc, plan.r23_unwind_label);
