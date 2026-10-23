@@ -3330,7 +3330,7 @@ use rustc_span::RemapPathScopeComponents;
                 return;
             }
             let ty = func.ty(&enc_ctx.body().local_decls, tcx);
-            let ty::TyKind::FnDef(def_id, args) = ty.kind() else { return; };
+            let ty::TyKind::FnDef(def_id, fn_args) = ty.kind() else { return; };
             let callee_name = tcx.def_path_str(*def_id);
             if callee_name != "core::slice::<impl [T]>::as_mut_ptr" {
                 return;
@@ -3340,6 +3340,12 @@ use rustc_span::RemapPathScopeComponents;
                 .init_something();
             projection.set_callee_name(&callee_name);
             projection.set_callee_def_path_hash(&format!("{:?}", tcx.def_path_hash(*def_id)));
+            let Some(args) = fn_args.no_bound_vars() else {
+                projection.set_unsupported_reason(
+                    "callee FnDef substitutions contain bound variables and cannot be flattened",
+                );
+                return;
+            };
             if !tcx.is_mir_available(*def_id) {
                 projection.set_unavailable_reason("compiler reports no MIR body for the exact callee");
                 return;
